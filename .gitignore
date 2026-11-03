@@ -1,0 +1,13 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+data/
+test-results/
+tmp/
+*.zip
+.env
+.env.*
+!.env.example
+docs/preview-*.png
+!docs/preview-audit-*.png
