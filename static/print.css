@@ -1,0 +1,8 @@
+body{font:12px/1.45 "Segoe UI",Arial,sans-serif;color:#17301f;margin:24px}
+h2{font-size:15px;margin:22px 0 8px;color:#075c46}
+table{border-collapse:collapse;width:100%;margin-bottom:10px}
+td{border:1px solid #cfd8c6;padding:4px 7px;vertical-align:top}
+td.note{border:0;padding:2px 0;color:#4d6150}
+section{page-break-after:always}
+section:last-child{page-break-after:auto}
+@media print{body{margin:0}.no-print{display:none}}

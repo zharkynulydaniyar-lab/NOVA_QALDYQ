@@ -18,6 +18,11 @@ import socket
 import time
 import threading
 from features import migrate, generate_reminders, food_insights, local_day
+from common import APIError, now, number, can_review, STAGES, UNITS
+import mod_admin
+import mod_period
+
+MODULES = [mod_admin, mod_period]
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
@@ -31,45 +36,48 @@ PASSWORD = "demo2026"
 SESSIONS: dict[str, dict] = {}
 LOGIN_FAILURES: dict[str, list[float]] = {}
 STATUSES = {"draft", "submitted", "in_review", "accepted", "returned"}
-UNITS = {"kg": "кг", "l": "л"}
 DEMO_DAYS = 91  # 2026-08-01 … 2026-10-30: үш ай
 
 # Ұйымдар мен қалдық түрлері — «АТУ университет кешеніндегі тамақ қалдықтарын есепке алу кестесі» үлгілері бойынша (ТЗ, 3-бөлім).
-ORGANIZATIONS = [
-    ("1, 2-корпус асхана кешені (ЖК «Искандер»)", "Асхана", "Асхана"),
-    ("ATU INN оқу-қонақүй кешені", "Қонақүй", "ATU INN"),
-    ("АТУ кофеханасы (ЖК «Canella»)", "Кофехана", "Кофехана"),
-    ("ТПП кафедрасы", "Кафедра", "ТПП"),
-    ("ТХиПП кафедрасы", "Кафедра", "ТХиПП"),
+ORGANIZATIONS = [  # атауы, түрі, қысқа атауы, орысша атауы, мекенжайы, жұмыс уақыты, студенттерге ашық, сипаттама
+    ("1, 2-корпус асхана кешені (ЖК «Искандер»)", "Асхана", "Асхана", "Столовый комплекс корп. 1, 2 (ИП «Искандер»)", "1-корпус, 1-қабат (демо мекенжай)", "Дс–Сб 09:00–17:00", 1, "Түскі ас және ыстық тағам"),
+    ("ATU INN оқу-қонақүй кешені", "Қонақүй", "ATU INN", "Учебно-гостиничный комплекс ATU INN", "ATU INN ғимараты (демо мекенжай)", "Күн сайын 08:00–20:00", 1, "Оқу-қонақүй кешенінің мейрамханасы"),
+    ("АТУ кофеханасы (ЖК «Canella»)", "Кофехана", "Кофехана", "Кофейня АТУ (ИП «Canella»)", "Бас корпус, фойе (демо мекенжай)", "Дс–Сб 08:30–18:00", 1, "Кофе, сусындар және тәттілер"),
+    ("ТПП кафедрасы", "Кафедра", "ТПП", "Кафедра ТПП", "Оқу зертханасы (демо мекенжай)", "", 0, "Оқу зертханасы: зертханалық сабақ күндері"),
+    ("ТХиПП кафедрасы", "Кафедра", "ТХиПП", "Кафедра ТХиПП", "Оқу зертханасы (демо мекенжай)", "", 0, "Оқу зертханасы: зертханалық сабақ күндері"),
 ]
 USERS = [
     ("operator@atu.kz", "Демо қызметкер", "operator", 1), ("reviewer@atu.kz", "Демо тексеруші", "reviewer", None),
     ("manager@atu.kz", "Демо басшылық", "manager", None), ("admin@atu.kz", "Жүйе әкімшісі", "admin", None),
     ("inn@atu.kz", "ATU INN жауаптысы", "operator", 2), ("coffee@atu.kz", "Кофехана жауаптысы", "operator", 3),
     ("tpp@atu.kz", "ТПП жауаптысы", "operator", 4), ("thipp@atu.kz", "ТХиПП жауаптысы", "operator", 5),
+    ("student@atu.kz", "Демо студент", "student", None),
 ]
-# атауы, өлшем бірлігі, қайта өңдеуге жарамды, әдепкі тәсіл, демо құн ₸/бірлік, демо кг CO₂e/бірлік
+FACTOR_SOURCE = "Команданың жорамалы (демо); дереккөзбен расталмаған"
+FACTOR_BOUNDARY = "Шекара анықталмаған — пилотта тіркеледі"
+# атауы, өлшем бірлігі, қайта өңдеуге жарамды, әдепкі тәсіл, демо құн ₸/бірлік, демо кг CO₂e/бірлік, орысша атауы
 WASTE_TYPES = [
-    ("Көкөніс тазалағы", "kg", 1, "compost", 150, 0.8),
-    ("Ет өнімдерінің кесінділері", "kg", 0, "tbo", 2500, 6.0),
-    ("Залдан шыққан тамақ қалдығы", "kg", 0, "tbo", 1800, 2.5),
-    ("Сатылмаған өнім қалдығы", "kg", 0, "tbo", 1800, 2.5),
-    ("Пайдаланылған май", "l", 1, "recycling", 600, 3.0),
-    ("Картон ыдыс", "kg", 1, "recycling", 40, 0.9),
-    ("Кофе сығындысы", "kg", 1, "compost", 150, 0.4),
-    ("Тамақ қалдығы", "kg", 0, "tbo_bin", 1500, 2.5),
-    ("Қаптама қалдығы", "kg", 1, "recycling", 60, 1.5),
-    ("Ет сүйегі", "kg", 0, "tbo", 800, 2.0),
-    ("Балық сүйегі", "kg", 0, "tbo", 800, 1.5),
-    ("Жұмыртқа қабығы", "kg", 1, "compost", 50, 0.3),
-    ("Сахароза", "kg", 0, "tbo", 400, 0.6),
-    ("ПЭТ-бөтелке 1,0 л (өсімдік майы)", "kg", 1, "recycling", 60, 2.2),
-    ("Шыны бөтелке", "kg", 1, "recycling", 30, 0.9),
-    ("Нан-тоқаш өнімдері үлгілерінің қалдығы", "kg", 0, "tbo", 700, 1.1),
-    ("Кондитерлік өнімдер үлгілерінің қалдығы", "kg", 0, "tbo", 1200, 1.6),
-    ("Жеміс-көкөніс қалдығы", "kg", 1, "compost", 550, 0.8),
-    ("Алюминий банка", "kg", 1, "recycling", 80, 9.0),
+    ("Көкөніс тазалағы", "kg", 1, "compost", 150, 0.8, "Очистки овощей"),
+    ("Ет өнімдерінің кесінділері", "kg", 0, "tbo", 2500, 6.0, "Обрезки мясопродуктов"),
+    ("Залдан шыққан тамақ қалдығы", "kg", 0, "tbo", 1800, 2.5, "Пищевые отходы из зала"),
+    ("Сатылмаған өнім қалдығы", "kg", 0, "tbo", 1800, 2.5, "Остатки нереализованной продукции"),
+    ("Пайдаланылған май", "l", 1, "recycling", 600, 3.0, "Отработанное масло"),
+    ("Картон ыдыс", "kg", 1, "recycling", 40, 0.9, "Картонная тара"),
+    ("Кофе сығындысы", "kg", 1, "compost", 150, 0.4, "Кофейный жмых"),
+    ("Тамақ қалдығы", "kg", 0, "tbo_bin", 1500, 2.5, "Остатки еды"),
+    ("Қаптама қалдығы", "kg", 1, "recycling", 60, 1.5, "Упаковочные отходы"),
+    ("Ет сүйегі", "kg", 0, "tbo", 800, 2.0, "Мясные кости"),
+    ("Балық сүйегі", "kg", 0, "tbo", 800, 1.5, "Рыбные кости"),
+    ("Жұмыртқа қабығы", "kg", 1, "compost", 50, 0.3, "Яичная скорлупа"),
+    ("Сахароза", "kg", 0, "tbo", 400, 0.6, "Сахароза"),
+    ("ПЭТ-бөтелке 1,0 л (өсімдік майы)", "kg", 1, "recycling", 60, 2.2, "ПЭТ-бутылка 1,0 л (растительное масло)"),
+    ("Шыны бөтелке", "kg", 1, "recycling", 30, 0.9, "Стеклобутылка"),
+    ("Нан-тоқаш өнімдері үлгілерінің қалдығы", "kg", 0, "tbo", 700, 1.1, "Отходы образцов хлебобулочных изделий"),
+    ("Кондитерлік өнімдер үлгілерінің қалдығы", "kg", 0, "tbo", 1200, 1.6, "Отходы образцов кондитерских изделий"),
+    ("Жеміс-көкөніс қалдығы", "kg", 1, "compost", 550, 0.8, "Отходы фруктов и овощей"),
+    ("Алюминий банка", "kg", 1, "recycling", 80, 9.0, "Алюминиевые банки"),
 ]
+STAGE_OF = {"Көкөніс тазалағы": "prep", "Ет өнімдерінің кесінділері": "prep", "Залдан шыққан тамақ қалдығы": "plate", "Сатылмаған өнім қалдығы": "unsold", "Тамақ қалдығы": "plate", "Кофе сығындысы": "prep"}
 _CATERING = ["Көкөніс тазалағы", "Ет өнімдерінің кесінділері", "Залдан шыққан тамақ қалдығы", "Сатылмаған өнім қалдығы", "Пайдаланылған май", "Картон ыдыс"]
 ORG_WASTE = {
     1: _CATERING, 2: _CATERING,
@@ -78,10 +86,6 @@ ORG_WASTE = {
     5: ["Жұмыртқа қабығы", "Сахароза", "ПЭТ-бөтелке 1,0 л (өсімдік майы)", "Шыны бөтелке", "Нан-тоқаш өнімдері үлгілерінің қалдығы", "Кондитерлік өнімдер үлгілерінің қалдығы", "Жеміс-көкөніс қалдығы", "Алюминий банка"],
 }
 SESSION_TTL = 8 * 3600
-
-
-def now():
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def password_hash(password, salt):
@@ -122,15 +126,16 @@ def initialize(db_path):
         CREATE INDEX IF NOT EXISTS report_period ON reports(report_date, org_id, status);
         """)
         migrate(db)
+        for module in MODULES:
+            module.migrate(db)
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
             return
-        for name, kind, short in ORGANIZATIONS:
-            db.execute("INSERT INTO organizations(name,kind,short) VALUES (?,?,?)", (name, kind, short))
+        for name, kind, short, name_ru, address, hours, is_public, description in ORGANIZATIONS:
+            db.execute("INSERT INTO organizations(name,kind,short,name_ru,address,hours,is_public,description) VALUES (?,?,?,?,?,?,?,?)", (name, kind, short, name_ru, address, hours, is_public, description))
         for email, name, role, org in USERS:
-            salt = secrets.token_hex(16)
-            db.execute("INSERT INTO users(email,name,role,org_id,salt,password_hash) VALUES (?,?,?,?,?,?)", (email, name, role, org, salt, password_hash(PASSWORD, salt)))
-        for name, unit, recyclable, route, cost, co2 in WASTE_TYPES:
-            db.execute("INSERT INTO categories(name,unit,recyclable,default_route,cost,co2) VALUES (?,?,?,?,?,?)", (name, unit, recyclable, route, cost, co2))
+            mod_admin.create_user(db, email, name, role, org, PASSWORD, 1 if role == "admin" else 0, is_demo=1)
+        for name, unit, recyclable, route, cost, co2, name_ru in WASTE_TYPES:
+            db.execute("INSERT INTO categories(name,unit,recyclable,default_route,cost,co2,name_ru,source,boundary) VALUES (?,?,?,?,?,?,?,?,?)", (name, unit, recyclable, route, cost, co2, name_ru, FACTOR_SOURCE, FACTOR_BOUNDARY))
         cats = {r["name"]: dict(r) for r in db.execute("SELECT * FROM categories")}
         for org, names in ORG_WASTE.items():
             for name in names:
@@ -163,7 +168,7 @@ def initialize(db_path):
                     kg = round(rng.uniform(1.0, 8.0) * scale[org], 1)
                     if cat is unusual:
                         kg = 38.5
-                    db.execute("INSERT INTO items(report_id,category_id,kg,route,cost,co2) VALUES (?,?,?,?,?,?)", (report_id, cat["id"], kg, cat["default_route"], cat["cost"], cat["co2"]))
+                    db.execute("INSERT INTO items(report_id,category_id,kg,route,cost,co2,stage) VALUES (?,?,?,?,?,?,?)", (report_id, cat["id"], kg, cat["default_route"], cat["cost"], cat["co2"], STAGE_OF.get(cat["name"], "other")))
                 if org in (1, 2) and offset in (7, 14, 21):
                     served = {7:170, 14:180, 21:160}[offset]
                     db.execute('UPDATE reports SET portions=? WHERE id=?', (served, report_id))
@@ -177,25 +182,47 @@ def initialize(db_path):
                 if status in ("accepted", "returned"):
                     comment = "Өлшем нәтижесімен салыстырып, массаны нақтылаңыз." if status == "returned" else ""
                     db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,2,?,?,?)", (report_id, status, comment, stamp))
+        for module in MODULES:
+            if hasattr(module, "seed"):
+                module.seed(db)
 
-class APIError(Exception):
-    def __init__(self, message, status=400):
-        self.message, self.status = message, status
+def static_paths():
+    """Everything under static/ is a public asset; nothing outside it is ever served."""
+    base = ROOT / "static"
+    paths = {"/"}
+    for file in base.rglob("*"):
+        if file.is_file():
+            relative = "/" + file.relative_to(base).as_posix()
+            paths.add(relative)
+            if file.name == "index.html":
+                paths.add(relative[:-len("index.html")])
+    return paths
 
 
-def number(value, name, minimum=0, maximum=1e8):
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        raise APIError(f"{name}: сан енгізіңіз.")
-    if not minimum <= result <= maximum:
-        raise APIError(f"{name}: мән {minimum}–{maximum} аралығында болуы керек.")
-    return result
+STATIC_PATHS = static_paths()
 
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / "static"), **kwargs)
+
+    def log_message(self, format, *args):
+        # Query strings can carry pickup codes and filters; keep them out of the access log.
+        super().log_message(format, *[re.sub(r"\?[^ \"]*", "", a) if isinstance(a, str) else a for a in args])
+
+    def start_session(self, user_id):
+        token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
+        SESSIONS[token] = {"user_id": user_id, "csrf": csrf, "expires": time.time() + SESSION_TTL}
+        return {"Set-Cookie": f"qaldyq_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL}"}
+
+    def drop_sessions(self, user_id):
+        for token in [t for t, value in SESSIONS.items() if value["user_id"] == user_id]:
+            SESSIONS.pop(token, None)
+
+    def check_origin(self):
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).netloc != self.headers.get("Host"):
+            raise APIError("Сұрау көзіне рұқсат жоқ.", 403)
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -251,7 +278,7 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
             self.api("GET", parsed)
-        elif parsed.path in ("/", "/index.html", "/app.js", "/i18n.js", "/i18n.css", "/features.js", "/features.css", "/offline-store.js", "/sw.js", "/vendor/qrcode.js", "/vendor/QRCODE-LICENSE.txt", "/styles.css", "/studio.css", "/animations.js", "/animations.css", "/vendor/three.module.js", "/vendor/three.core.js", "/vendor/THREE-LICENSE.txt", "/favicon.svg", "/campus-3d-v2.png", "/cycle-3d-v2.png"):
+        elif parsed.path in STATIC_PATHS:
             super().do_GET()
         else:
             self.send_error(404)
@@ -295,25 +322,42 @@ class Handler(SimpleHTTPRequestHandler):
             if not user or not hmac.compare_digest(user["password_hash"], password_hash(str(data.get("password", "")), user["salt"])):
                 LOGIN_FAILURES[ip] = failures + [time.time()]
                 raise APIError("Email немесе құпиясөз қате.", 401)
+            if not user["active"]:
+                raise APIError("Аккаунт өшірілген. Әкімшіге хабарласыңыз.", 403)
             LOGIN_FAILURES.pop(ip, None)
-            token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
-            SESSIONS[token] = {"user_id": user["id"], "csrf": csrf, "expires": time.time() + SESSION_TTL}
-            return self.respond({"ok": True}, headers={"Set-Cookie": f"qaldyq_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL}"})
+            return self.respond({"ok": True, "role": user["role"]}, headers=self.start_session(user["id"]))
+        if path.startswith("/api/public/") or path == "/api/register":
+            if method != "GET":
+                self.check_origin()
+                db.execute("BEGIN IMMEDIATE")
+            for module in MODULES:
+                if hasattr(module, "public") and module.public(self, db, method, path, query):
+                    return
+            raise APIError("Мұндай әрекет табылмады.", 404)
         token, session = self.session()
-        user = dict(db.execute("SELECT id,email,name,role,org_id FROM users WHERE id=?", (session["user_id"],)).fetchone())
+        row = db.execute("SELECT id,email,name,role,org_id,active,can_review FROM users WHERE id=?", (session["user_id"],)).fetchone()
+        if not row or not row["active"]:
+            SESSIONS.pop(token, None)
+            raise APIError("Жүйеге кіріңіз.", 401)
+        user = dict(row)
+        self.current_session = session
         if method != "GET":
             if not hmac.compare_digest(self.headers.get("X-CSRF-Token", ""), session["csrf"]):
                 raise APIError("Сессияны жаңартып, қайта көріңіз.", 403)
-            origin = self.headers.get("Origin")
-            if origin and urlparse(origin).netloc != self.headers.get("Host"):
-                raise APIError("Сұрау көзіне рұқсат жоқ.", 403)
+            self.check_origin()
             # Serialize state transitions so two reviewers cannot overwrite each other.
             db.execute("BEGIN IMMEDIATE")
+        # Students reach only their own area; every staff endpoint is closed to them by default.
+        if user["role"] == "student" and not path.startswith("/api/student/") and path not in ("/api/logout", "/api/me"):
+            raise APIError("Бұл бөлім қызметкерлерге арналған.", 403)
         if path == "/api/logout" and method == "POST":
             SESSIONS.pop(token, None)
             return self.respond({"ok": True}, headers={"Set-Cookie": "qaldyq_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
         if path == "/api/bootstrap" and method == "GET":
-            return self.respond({"user": user, "csrf": session["csrf"], "organizations": [dict(r) for r in db.execute("SELECT * FROM organizations ORDER BY id")], "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY id")], "org_categories": self.org_categories(db), "routes": [dict(r) for r in db.execute("SELECT code,name,diverted FROM routes ORDER BY position,code")], "factors_note": db.execute("SELECT value FROM settings WHERE key='factors_note'").fetchone()[0], "demo_date": DEMO_DAY.isoformat(), "today": local_day().isoformat()})
+            return self.respond({"user": user, "csrf": session["csrf"], "organizations": mod_admin.organizations(db), "stages": list(STAGES), "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY id")], "org_categories": self.org_categories(db), "routes": [dict(r) for r in db.execute("SELECT code,name,diverted FROM routes ORDER BY position,code")], "factors_note": db.execute("SELECT value FROM settings WHERE key='factors_note'").fetchone()[0], "demo_date": DEMO_DAY.isoformat(), "today": local_day().isoformat()})
+        for module in MODULES:
+            if module.handle(self, db, user, method, path, query):
+                return
         if path == "/api/totals" and method == "GET":
             org = user["org_id"] if user["role"] == "operator" else int(query.get("org", [0])[0])
             day = date.fromisoformat(query.get("date", [local_day().isoformat()])[0]).isoformat()
@@ -359,6 +403,7 @@ class Handler(SimpleHTTPRequestHandler):
             if replay:
                 return self.respond({'id': replay, 'replayed': True}, 201)
             values, items = self.validate_report(db, user, data)
+            mod_period.ensure_unlocked(db, values["org_id"], values["report_date"])
             stamp = now()
             status = 'submitted' if data.get('submit') is True else 'draft'
             report_id = db.execute("INSERT INTO reports(org_id,author_id,report_date,status,note,photo,created_at,updated_at,portions) VALUES (?,?,?,?,?,?,?,?,?)", (values["org_id"], user["id"], values["report_date"], status, values["note"], values["photo"], stamp, stamp, values['portions'])).lastrowid
@@ -369,7 +414,34 @@ class Handler(SimpleHTTPRequestHandler):
                 self.history(db, report_id, user, 'submitted', 'Мобильді есеп жіберілді')
                 generate_reminders(db)
             self.remember_request(db, user, data, 'create', report_id)
-            return self.respond({"id": report_id}, 201)
+            return self.respond({"id": report_id, "duplicates": self.content_duplicates(db, report_id)}, 201)
+        if path == "/api/quick" and method == "POST":
+            # Fast entry: one measurement goes into today's draft record of this employee.
+            if user["role"] not in ("operator", "admin"):
+                raise APIError("Өлшемді жауапты қызметкер немесе әкімші енгізеді.", 403)
+            data = self.body()
+            replay = self.request_replay(db, user, data, 'quick')
+            if replay:
+                return self.respond({'id': replay, 'replayed': True}, 201)
+            day = local_day().isoformat()
+            item = {k: data.get(k) for k in ("category_id", "kg", "route", "stage", "note")}
+            if not item["route"]:
+                cat = db.execute("SELECT default_route FROM categories WHERE id=?", (int(data.get("category_id") or 0),)).fetchone()
+                item["route"] = cat["default_route"] if cat else None
+            values, items = self.validate_report(db, user, {"org_id": data.get("org_id") or user["org_id"], "report_date": day, "items": [item]})
+            mod_period.ensure_unlocked(db, values["org_id"], day)
+            stamp = now()
+            record = db.execute("SELECT id FROM reports WHERE org_id=? AND author_id=? AND report_date=? AND status='draft' ORDER BY id DESC LIMIT 1", (values["org_id"], user["id"], day)).fetchone()
+            if record:
+                report_id = record["id"]
+                db.execute("UPDATE reports SET updated_at=? WHERE id=?", (stamp, report_id))
+            else:
+                report_id = db.execute("INSERT INTO reports(org_id,author_id,report_date,status,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?)", (values["org_id"], user["id"], day, "draft", "Жылдам енгізу", stamp, stamp)).lastrowid
+                self.history(db, report_id, user, "created", "Жылдам енгізу")
+            self.save_items(db, report_id, items)
+            self.remember_request(db, user, data, 'quick', report_id)
+            total = db.execute("SELECT ROUND(SUM(i.kg),2) FROM items i JOIN reports r ON r.id=i.report_id WHERE r.org_id=? AND r.report_date=? AND i.category_id=?", (values["org_id"], day, items[0][0])).fetchone()[0]
+            return self.respond({"id": report_id, "day_total": total, "duplicates": self.content_duplicates(db, report_id)}, 201)
         match = re.fullmatch(r"/api/reports/(\d+)(?:/(transition))?", path)
         if match:
             report_id = int(match[1])
@@ -396,6 +468,8 @@ class Handler(SimpleHTTPRequestHandler):
                 values, items = self.validate_report(db, user, data)
                 if values["org_id"] != report["org_id"]:
                     raise APIError("Есептің ұйымын өзгертуге болмайды.")
+                mod_period.ensure_unlocked(db, report["org_id"], report["report_date"])
+                mod_period.ensure_unlocked(db, report["org_id"], values["report_date"])
                 db.execute("UPDATE reports SET report_date=?,note=?,photo=?,updated_at=?,portions=? WHERE id=?", (values["report_date"], values["note"], values["photo"], now(), values['portions'], report_id))
                 db.execute("DELETE FROM items WHERE report_id=?", (report_id,))
                 self.save_items(db, report_id, items)
@@ -412,16 +486,18 @@ class Handler(SimpleHTTPRequestHandler):
                 if target == "submitted":
                     allowed = user["role"] in ("operator", "admin") and report["status"] in ("draft", "returned")
                 elif target == "in_review":
-                    allowed = user["role"] in ("reviewer", "admin") and report["status"] == "submitted"
+                    allowed = can_review(user) and report["status"] == "submitted"
                 elif target in ("accepted", "returned"):
-                    allowed = user["role"] in ("reviewer", "admin") and report["status"] == "in_review"
+                    allowed = can_review(user) and report["status"] == "in_review"
                 if not allowed:
                     raise APIError("Бұл мәртебеге ауыстыруға рұқсат жоқ.", 403)
+                # Records inside a submitted period report move only together with that report.
+                mod_period.ensure_unlocked(db, report["org_id"], report["report_date"])
                 comment = str(data.get("comment", "")).strip()[:2000]
                 if target == "returned" and not comment:
                     raise APIError("Қайтару себебін жазыңыз.")
                 db.execute("UPDATE reports SET status=?,updated_at=? WHERE id=?", (target, now(), report_id))
-                self.history(db, report_id, user, target, comment)
+                self.history(db, report_id, user, target, comment, report["status"])
                 generate_reminders(db)
                 return self.respond({"ok": True})
         if path == "/api/organizations" and method == "POST":
@@ -468,6 +544,14 @@ class Handler(SimpleHTTPRequestHandler):
                 db.execute("INSERT OR IGNORE INTO org_categories SELECT id,? FROM organizations", (category_id,))
             return self.respond({"ok": True, "id": category_id}, 201)
         raise APIError("Мұндай әрекет табылмады.", 404)
+
+    def content_duplicates(self, db, report_id):
+        """Likely repeated measurements: same organization, date, waste type and quantity in another record.
+        This is a content warning only; replay protection is the separate request_id check."""
+        return [dict(r) for r in db.execute("""SELECT other.report_id,c.name,mine.kg FROM items mine
+            JOIN reports r ON r.id=mine.report_id JOIN items other ON other.category_id=mine.category_id AND other.kg=mine.kg AND other.report_id!=mine.report_id
+            JOIN reports o ON o.id=other.report_id AND o.org_id=r.org_id AND o.report_date=r.report_date
+            JOIN categories c ON c.id=mine.category_id WHERE mine.report_id=? GROUP BY other.report_id,c.id""", (report_id,))]
 
     def check_version(self, data, report):
         if data.get("updated_at") != report["updated_at"]:
@@ -530,14 +614,20 @@ class Handler(SimpleHTTPRequestHandler):
         if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 30:
             raise APIError("Кемінде бір қалдық жолы қажет, ең көбі — 30.")
         items = []
-        routes = {r["code"] for r in db.execute("SELECT code FROM routes")}
+        routes = {r["code"] for r in db.execute("SELECT code FROM routes WHERE active=1")}
         for raw in raw_items:
             if not isinstance(raw, dict):
                 raise APIError("Қалдық жолы дұрыс емес.")
-            cat = db.execute("SELECT c.* FROM categories c JOIN org_categories oc ON oc.category_id=c.id WHERE c.id=? AND oc.org_id=?", (int(raw.get("category_id", 0)), org_id)).fetchone()
+            cat = db.execute("SELECT c.* FROM categories c JOIN org_categories oc ON oc.category_id=c.id WHERE c.id=? AND oc.org_id=? AND c.active=1", (int(raw.get("category_id", 0)), org_id)).fetchone()
             if not cat or raw.get("route") not in routes:
                 raise APIError("Қалдық түрі мен кәдеге жарату тәсілін ұйым тізімінен таңдаңыз.")
-            items.append((cat["id"], number(raw.get("kg"), "Масса", 0.01, 10000), raw["route"], cat["cost"], cat["co2"]))
+            quantity = number(raw.get("kg"), "Масса", 0.01, 10000)
+            if abs(quantity * 100 - round(quantity * 100)) > 1e-6:
+                raise APIError("Мөлшерді үтірден кейін екі таңбаға дейін енгізіңіз.")
+            stage = raw.get("stage") or "other"
+            if stage not in STAGES:
+                raise APIError("Қалдықтың пайда болу кезеңін таңдаңыз.")
+            items.append((cat["id"], quantity, raw["route"], cat["cost"], cat["co2"], stage, str(raw.get("note") or "").strip()[:500]))
         portions = data.get('portions')
         if portions not in (None, ''):
             portions = number(portions, 'Сатылған порция', 1, 100000)
@@ -566,10 +656,10 @@ class Handler(SimpleHTTPRequestHandler):
         return {"org_id": org_id, "report_date": report_date, "note": str(data.get("note", "")).strip()[:2000], "photo": photo, 'portions': portions, 'dishes': clean_dishes}, items
 
     def save_items(self, db, report_id, items):
-        db.executemany("INSERT INTO items(report_id,category_id,kg,route,cost,co2) VALUES (?,?,?,?,?,?)", [(report_id, *item) for item in items])
+        db.executemany("INSERT INTO items(report_id,category_id,kg,route,cost,co2,stage,note) VALUES (?,?,?,?,?,?,?,?)", [(report_id, *item) for item in items])
 
-    def history(self, db, report_id, user, action, comment):
-        db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,?,?,?,?)", (report_id, user["id"], action, comment, now()))
+    def history(self, db, report_id, user, action, comment, from_status=None):
+        db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at,from_status) VALUES (?,?,?,?,?,?)", (report_id, user["id"], action, comment, now(), from_status))
 
     def org_categories(self, db):
         result = {}
