@@ -52,7 +52,7 @@ async function openQueue(){
 
 function captureForm(existing,photo){
   return {org_id:Number($('#form-org').value),report_date:$('#form-date').value,note:$('#form-note').value,photo,portions:$('#form-portions').value?Number($('#form-portions').value):null,
-    items:$$('.waste-row').map(el=>({category_id:Number($('[name="category"]',el).value),kg:Number($('[name="kg"]',el).value),route:$('[name="route"]',el).value})),
+    items:$$('.waste-row').map(el=>({category_id:Number($('[name="category"]',el).value),kg:Number($('[name="kg"]',el).value),route:$('[name="route"]',el).value,stage:$('[name="stage"]',el)?.value||'other'})),
     dishes:$$('.dish-row').map(el=>({name:$('[name="dish-name"]',el).value.trim(),prepared:Number($('[name="prepared"]',el).value),served:Number($('[name="served"]',el).value),leftover:Number($('[name="leftover"]',el).value),leftover_kg:Number($('[name="leftover_kg"]',el).value)})),submit:$('#save-mode')?.value==='submit',updated_at:existing?.updated_at,id:existing?.id,request_id:existing?.request_id,_queueKey:existing?._queueKey};
 }
 

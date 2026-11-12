@@ -1,6 +1,6 @@
 importScripts('/offline-store.js?v=4.2');
-const CACHE='qaldyq-shell-v5.4.0';
-const SHELL=['/','/index.html','/i18n.js?v=5.4.0','/i18n.css?v=5.4.0','/app.js?v=5.4.0','/features.js?v=5.4.0','/features.css?v=5.4.0','/offline-store.js?v=4.2','/vendor/qrcode.js','/styles.css','/studio.css?v=2','/animations.css?v=3','/animations.js?v=5.4.0','/vendor/three.module.js','/vendor/three.core.js','/favicon.svg','/campus-3d-v2.png','/cycle-3d-v2.png'];
+const CACHE='qaldyq-shell-v6.0';
+const SHELL=['/','/index.html','/i18n.js?v=5.4.0','/i18n.css?v=5.4.0','/app.js?v=5.4.0','/features.js?v=5.4.0','/ops.js?v=6.0','/i18n-ops.js?v=6.0','/ops.css?v=6.0','/features.css?v=5.4.0','/offline-store.js?v=4.2','/vendor/qrcode.js','/styles.css','/studio.css?v=2','/animations.css?v=3','/animations.js?v=5.4.0','/vendor/three.module.js','/vendor/three.core.js','/favicon.svg','/campus-3d-v2.png','/cycle-3d-v2.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('qaldyq-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{

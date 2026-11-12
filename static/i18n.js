@@ -482,7 +482,9 @@
     apply();document.dispatchEvent(new CustomEvent('qaldyq:language',{detail:{language}}));
   }
   function switcher(){return '<div class="language-switch" role="group" aria-label="Интерфейс тілі"><button type="button" data-language="kk" lang="kk" aria-pressed="'+(language==='kk')+'" title="Қазақшаға ауысу">ҚАЗ</button><button type="button" data-language="ru" lang="ru" aria-pressed="'+(language==='ru')+'" title="Орысшаға ауысу">РУС</button></div>';}
-  window.QaldyqI18n={text,apply,setLanguage,switcher,get language(){return language;}};
+  // Feature modules add their own phrases; exact phrases first, then [RegExp, replacement] pairs.
+  function extend(dictionary,more=[]){Object.assign(RU,dictionary);patterns.push(...more);}
+  window.QaldyqI18n={text,apply,setLanguage,switcher,extend,get language(){return language;}};
   document.addEventListener('click',event=>{const button=event.target.closest('[data-language]');if(button)setLanguage(button.dataset.language);});
   function start(){
     observer=new MutationObserver(records=>{
