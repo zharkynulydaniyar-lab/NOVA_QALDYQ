@@ -93,3 +93,28 @@ def rows(cursor):
 
 
 EMAIL = re.compile(r"^[a-z0-9._%+-]{1,64}@[a-z0-9.-]{1,120}\.[a-z]{2,24}$")
+
+
+def local_now():
+    """Campus wall-clock time (Asia/Qyzylorda, UTC+5) as a naive datetime. Tests replace this function."""
+    from datetime import timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Qyzylorda")).replace(tzinfo=None)
+    except Exception:
+        return (datetime.now(timezone.utc) + timedelta(hours=5)).replace(tzinfo=None)
+
+
+def money(value, name="Сома", maximum=10**11):
+    """Money is stored as whole tiyn (1 ₸ = 100 tiyn); input is tenge with at most two decimals."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise APIError(f"{name}: сан енгізіңіз.")
+    if not amount.is_finite() or amount < 0 or amount != amount.quantize(Decimal("0.01")):
+        raise APIError(f"{name}: теріс емес, тиынға дейінгі дәлдікпен енгізіңіз.")
+    tiyn = int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    if tiyn > maximum:
+        raise APIError(f"{name}: мән тым үлкен.")
+    return tiyn

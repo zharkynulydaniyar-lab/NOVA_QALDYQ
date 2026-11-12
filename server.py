@@ -22,7 +22,9 @@ from common import APIError, now, number, can_review, STAGES, UNITS
 import mod_admin
 import mod_period
 
-MODULES = [mod_admin, mod_period]
+import mod_student
+
+MODULES = [mod_admin, mod_period, mod_student]
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
@@ -772,6 +774,10 @@ def create_server(host="127.0.0.1", port=8765, db_path=None):
     # is left untouched on disk and is simply no longer opened.
     db_path = str(db_path or ROOT / "data" / "qaldyq-v5.4.sqlite3")
     initialize(db_path)
+    with connect(db_path) as db:
+        for module in MODULES:
+            if hasattr(module, "startup"):
+                module.startup(db)
     server = LocalServer((host, port), Handler)
     server.db_path = db_path
     server.reminder_stop = threading.Event()

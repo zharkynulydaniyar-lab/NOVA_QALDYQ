@@ -1,0 +1,16 @@
+{
+  "name": "Qaldyq · Студент",
+  "short_name": "Qaldyq",
+  "description": "АТУ асханаларының мәзірі және алдын ала тапсырыс",
+  "lang": "kk",
+  "start_url": "/student/",
+  "scope": "/student/",
+  "display": "standalone",
+  "background_color": "#f4f8ee",
+  "theme_color": "#075c46",
+  "icons": [
+    { "src": "/student/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/student/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/student/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
