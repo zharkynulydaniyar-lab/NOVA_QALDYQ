@@ -165,27 +165,44 @@ class QaldyqTests(unittest.TestCase):
         for photo in ("data:image/svg+xml;base64,AAAA", "data:image/png;base64," + base64.b64encode(b"not png").decode(), "data:image/png;base64,!!!"):
             self.assertEqual(self.operator.request("/api/reports", "POST", self.payload(photo=photo))[0], 400)
 
+    def accept(self, report_id):
+        self.assertEqual(self.transition(report_id, "submitted")[0], 200)
+        self.assertEqual(self.transition(report_id, "in_review", self.reviewer)[0], 200)
+        self.assertEqual(self.transition(report_id, "accepted", self.reviewer)[0], 200)
+
     def test_12_exports_have_correct_rows_and_formula_safety(self):
-        self.create_report(note="=HYPERLINK(\"bad\")")
+        draft_id = self.create_report(note="Черновик экспортқа кірмейді")
+        accepted_id = self.create_report(note="=HYPERLINK(\"bad\")")
+        self.accept(accepted_id)
         status, body, headers = self.operator.request("/api/export?format=csv&start=2026-10-30&end=2026-10-30")
         self.assertEqual(status, 200)
         self.assertIn("attachment", headers["Content-Disposition"])
         rows = list(csv.reader(io.StringIO(body.decode("utf-8-sig"))))
-        self.assertEqual(len(rows[0]), 10)
+        self.assertEqual(len(rows[0]), 11)
         self.assertTrue(any(row[-1].startswith("'=HYPERLINK") for row in rows[1:]))
-        self.assertTrue(all(row[2] == "1-корпус асханасы" for row in rows[1:]))
-        status, xml, _ = self.operator.request("/api/export?format=xls")
+        self.assertTrue(all(row[2] == "1, 2-корпус асхана кешені (ЖК «Искандер»)" for row in rows[1:]))
+        # Only accepted records reach the registry export; names are written in words.
+        self.assertNotIn(str(draft_id), {row[0] for row in rows[1:]})
+        self.assertTrue(all(row[7] == "Демо қызметкер" for row in rows[1:]))
+        self.assertTrue(all(row[6] in ("ТҚҚ шығару", "ТҚҚ шығару (қоқыс жәшігі)", "Қайта өңдеу", "Компосттау", "Жоюға жіберу") for row in rows[1:]))
+        status, xml, _ = self.manager.request("/api/export?format=xls&start=2026-08-01&end=2026-10-30")
         self.assertEqual(status, 200)
         root = ET.fromstring(xml)
         self.assertTrue(root.tag.endswith("Workbook"))
+        self.assertEqual(len([e for e in root if e.tag.endswith("Worksheet")]), 2)
+        status, body, _ = self.manager.request("/api/export?format=summary&start=2026-08-01&end=2026-10-30")
+        organizations = {row[0] for row in list(csv.reader(io.StringIO(body.decode("utf-8-sig"))))[1:]}
+        self.assertEqual(len(organizations), 5)
 
     def test_13_totals_and_date_filters(self):
         status, body, _ = self.manager.request("/api/reports?start=2026-10-01&end=2026-10-10&org=2")
         self.assertEqual(status, 200)
+        self.assertTrue(body["reports"])
         for report in body["reports"]:
             self.assertEqual(report["org_id"], 2)
             self.assertTrue("2026-10-01" <= report["report_date"] <= "2026-10-10")
-            self.assertAlmostEqual(report["kg"], sum(i["kg"] for i in report["items"]), places=2)
+            self.assertAlmostEqual(report["kg"], sum(i["kg"] for i in report["items"] if i["unit"] == "kg"), places=2)
+            self.assertAlmostEqual(report["liters"], sum(i["kg"] for i in report["items"] if i["unit"] == "l"), places=2)
             self.assertAlmostEqual(report["cost"], sum(i["kg"]*i["cost"] for i in report["items"]), places=2)
             self.assertAlmostEqual(report["co2"], sum(i["kg"]*i["co2"] for i in report["items"]), places=2)
 
@@ -195,6 +212,7 @@ class QaldyqTests(unittest.TestCase):
         self.assertEqual(self.admin.request("/api/organizations", "POST", {"name":"Тест зертханасы", "kind":"Кафедра"})[0], 201)
         self.assertEqual(self.admin.request("/api/organizations", "POST", {"name":"Тест зертханасы", "kind":"Кафедра"})[0], 409)
         self.assertEqual(self.admin.request("/api/categories", "POST", {"name":"Тест санаты", "cost":50, "co2":1.2})[0], 201)
+        self.assertEqual(self.admin.request("/api/categories", "POST", {"name":"Тест санаты", "cost":50, "co2":1.2})[0], 409)
 
     def test_15_coefficients_are_snapshotted(self):
         report_id = self.create_report()
@@ -370,6 +388,61 @@ class QaldyqTests(unittest.TestCase):
             with self.assertRaises(APIError):
                 Handler.body(handler)
             self.assertEqual(handler.rfile.tell(), 0)
+
+
+    def test_34_demo_data_cover_three_months_for_all_five_organizations(self):
+        boot = self.manager.request("/api/bootstrap")[1]
+        self.assertEqual([o["short"] for o in boot["organizations"][:5]], ["Асхана", "ATU INN", "Кофехана", "ТПП", "ТХиПП"])
+        self.assertEqual({r["code"] for r in boot["routes"]} >= {"tbo", "tbo_bin", "recycling", "compost"}, True)
+        self.assertGreaterEqual(len(boot["org_categories"]["5"]), 8)
+        with connect(self.db_path) as db:
+            for org in range(1, 6):
+                months = {r[0] for r in db.execute("SELECT DISTINCT substr(report_date,1,7) FROM reports WHERE org_id=? AND note='Демонстрациялық есеп' AND status='accepted'", (org,))}
+                self.assertEqual(months >= {"2026-08", "2026-09", "2026-10"}, True, org)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM users WHERE role='operator' AND org_id BETWEEN 1 AND 5").fetchone()[0], 5)
+
+    def test_35_operator_adds_waste_type_to_own_list_only(self):
+        self.assertEqual(self.manager.request("/api/categories", "POST", {"name": "Рұқсатсыз түр"})[0], 403)
+        status, body, _ = self.operator.request("/api/categories", "POST", {"name": "Шай қалдығы", "unit": "kg", "recyclable": True, "default_route": "compost", "org_id": 5, "cost": 999})
+        self.assertEqual(status, 201, body)
+        new_id = body["id"]
+        boot = self.operator.request("/api/bootstrap")[1]
+        self.assertIn(new_id, boot["org_categories"]["1"])
+        self.assertNotIn(new_id, boot["org_categories"]["5"])
+        created = next(c for c in boot["categories"] if c["id"] == new_id)
+        self.assertEqual((created["unit"], created["recyclable"], created["default_route"], created["cost"]), ("kg", 1, "compost", 0))
+        self.assertEqual(self.operator.request("/api/categories", "POST", {"name": "шай қалдығы"})[0], 409)
+        self.assertEqual(self.operator.request("/api/categories", "POST", {"name": "Литрсіз түр", "unit": "tonne"})[0], 400)
+        self.create_report(items=[{"category_id": new_id, "kg": 1.5, "route": "compost"}])
+        # A waste type from another organization's list is not accepted in this form.
+        foreign = boot["org_categories"]["5"][0]
+        self.assertEqual(self.operator.request("/api/reports", "POST", self.payload(items=[{"category_id": foreign, "kg": 1, "route": "tbo"}]))[0], 400)
+        # An existing name is linked to the organization instead of being duplicated.
+        other = Client(self.base).login("thipp")
+        status, body, _ = other.request("/api/categories", "POST", {"name": "Шай қалдығы"})
+        self.assertEqual((status, body["id"]), (201, new_id))
+
+    def test_36_waste_type_filter_units_and_running_totals(self):
+        boot = self.manager.request("/api/bootstrap")[1]
+        oil = next(c for c in boot["categories"] if c["unit"] == "l")
+        status, body, _ = self.manager.request(f"/api/reports?start=2026-08-01&end=2026-10-30&category={oil['id']}")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["reports"])
+        for report in body["reports"]:
+            self.assertTrue(all(i["category_id"] == oil["id"] for i in report["items"]))
+            self.assertEqual(report["kg"], 0)
+            self.assertGreater(report["liters"], 0)
+        before = self.operator.request("/api/totals?date=2026-10-29")[1]
+        report_id = self.create_report(report_date="2026-10-29", items=[{"category_id": 1, "kg": 2.5, "route": "compost"}])
+        after = self.operator.request("/api/totals?date=2026-10-29")[1]
+        pick = lambda data: next((t for t in data["totals"] if t["category_id"] == 1), {"day": 0, "month": 0})
+        self.assertAlmostEqual(pick(after)["day"] - pick(before)["day"], 2.5, places=2)
+        self.assertAlmostEqual(pick(after)["month"] - pick(before)["month"], 2.5, places=2)
+        self.assertEqual(after["same_day_reports"], before["same_day_reports"] + 1)
+        excluded = self.operator.request(f"/api/totals?date=2026-10-29&exclude={report_id}")[1]
+        self.assertAlmostEqual(pick(excluded)["day"], pick(before)["day"], places=2)
+        # Operators cannot read another organization's totals.
+        self.assertEqual(self.operator.request("/api/totals?date=2026-10-29&org=2")[1]["totals"], after["totals"])
 
 
 if __name__ == "__main__":

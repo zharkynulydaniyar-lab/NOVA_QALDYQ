@@ -18,7 +18,22 @@ def migrate(db):
     columns = {r[1] for r in db.execute('PRAGMA table_info(reports)')}
     if 'portions' not in columns:
         db.execute('ALTER TABLE reports ADD COLUMN portions INTEGER')
+    cat_columns = {r[1] for r in db.execute('PRAGMA table_info(categories)')}
+    if 'unit' not in cat_columns:
+        db.execute("ALTER TABLE categories ADD COLUMN unit TEXT NOT NULL DEFAULT 'kg'")
+    if 'recyclable' not in cat_columns:
+        db.execute('ALTER TABLE categories ADD COLUMN recyclable INTEGER NOT NULL DEFAULT 0')
+    if 'default_route' not in cat_columns:
+        db.execute("ALTER TABLE categories ADD COLUMN default_route TEXT NOT NULL DEFAULT 'disposal'")
+    if 'short' not in {r[1] for r in db.execute('PRAGMA table_info(organizations)')}:
+        db.execute('ALTER TABLE organizations ADD COLUMN short TEXT')
     db.executescript('''
+    CREATE TABLE IF NOT EXISTS routes(code TEXT PRIMARY KEY, name TEXT NOT NULL, diverted INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0);
+    INSERT OR IGNORE INTO routes(code,name,diverted,position) VALUES
+      ('tbo','ТҚҚ шығару',0,1),('tbo_bin','ТҚҚ шығару (қоқыс жәшігі)',0,2),
+      ('recycling','Қайта өңдеу',1,3),('compost','Компосттау',1,4),('disposal','Жоюға жіберу',0,5);
+    CREATE TABLE IF NOT EXISTS org_categories(org_id INTEGER NOT NULL REFERENCES organizations(id),
+      category_id INTEGER NOT NULL REFERENCES categories(id), PRIMARY KEY(org_id,category_id));
     CREATE TABLE IF NOT EXISTS dishes(id INTEGER PRIMARY KEY,
       report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
       name TEXT NOT NULL, prepared INTEGER NOT NULL, served INTEGER NOT NULL,
@@ -31,6 +46,9 @@ def migrate(db):
       read_at TEXT, resolved_at TEXT, UNIQUE(user_id,period));
     INSERT OR IGNORE INTO settings(key,value) VALUES ('deadline_day','5');
     ''')
+    # Databases created before per-organization lists keep every category available everywhere.
+    if not db.execute('SELECT 1 FROM org_categories LIMIT 1').fetchone():
+        db.execute('INSERT OR IGNORE INTO org_categories SELECT o.id,c.id FROM organizations o CROSS JOIN categories c')
 
 
 def generate_reminders(db, today=None):

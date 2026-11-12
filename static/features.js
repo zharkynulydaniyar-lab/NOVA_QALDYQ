@@ -29,7 +29,7 @@ async function refreshOfflineStatus(){
 }
 
 async function queueReport(payload,existing){
-  const key=payload.request_id||crypto.randomUUID();payload.request_id=key;
+  const key=payload.request_id||uuid();payload.request_id=key;
   await QStore.put({key,user:state.boot.user.id,path:'/api/reports'+(existing?.id?'/'+existing.id:''),method:existing?.id?'PUT':'POST',payload,created:new Date().toISOString(),error:null});
   await QStore.del('draft:'+state.boot.user.id);
   try{const registration=await navigator.serviceWorker?.getRegistration();if(registration&&'sync' in registration)await registration.sync.register('qaldyq-reports');}catch{/* Online event remains the fallback. */}

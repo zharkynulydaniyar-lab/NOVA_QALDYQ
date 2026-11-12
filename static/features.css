@@ -5,3 +5,20 @@
 @media print{.offline-status{display:none}}
 
 .food-kpis~section.panel{margin-bottom:22px}
+
+/* v5.4 · ұйымның қалдық тізімі, жаңа түр, күн/ай жиынтығы, үшінші диаграмма */
+.filter-row,.filter-inputs{flex-wrap:wrap}
+.filter-inputs #filter-category{max-width:190px}
+.new-type-panel{border:1px dashed #cfdcc0;border-radius:10px;background:#f8fbf3;padding:14px 16px;margin:10px 0 18px}
+.new-type-panel label{display:block;margin-bottom:10px}
+.new-type-panel .form-error{margin:0 0 8px}
+.check-line{display:flex!important;align-items:center;gap:8px;font-size:12px}
+.check-line input{width:16px;height:16px;flex:none}
+.add-row+.add-row{margin-left:14px}
+.period-totals{margin:-8px 0 22px}
+.period-totals table{font-size:11px}
+.period-totals th,.period-totals td{padding:7px 10px}
+#duplicate-warning{margin:-10px 0 14px;color:#a8661a;font-size:11px}
+#duplicate-warning[hidden]{display:none}
+.chart-grid+.chart-panel{margin-bottom:22px}
+@media(max-width:700px){.filter-inputs #filter-category{max-width:none}.add-row+.add-row{margin-left:0;display:flex}}

@@ -194,7 +194,7 @@ function barsScene(data){
     const material=mat(i%2?0x759d5e:0x3d7954,{roughness:.45});
     const bar=mesh(world,roundBox(barWidth,1,.4,.035),material,x,.5,0);bar.userData.datum=d;bar.userData.height=height;bars.push(bar);hits.push(bar);
     const number=label(world,Math.round(d.value).toLocaleString('ru-RU'),.47,.17,x,height+.16,.06,'#5a7b42','#ffffff00');labels.push(number.object);
-    if(i%Math.max(1,Math.ceil(n/5))===0){const tick=label(world,d.label,.75,.17,x,-.12,.78,'#91a47b','#ffffff00');labels.push(tick.object);}
+    if(i%Math.max(1,Math.ceil(n/5))===0){const tick=label(world,d.short||d.label,.75,.17,x,-.12,.78,'#91a47b','#ffffff00');labels.push(tick.object);}
   });
   return {scene,world,hits,chart:true,update(t){
     const p=paused?1:1-Math.pow(1-Math.min(t/1.1,1),3);

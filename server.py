@@ -31,7 +31,52 @@ PASSWORD = "demo2026"
 SESSIONS: dict[str, dict] = {}
 LOGIN_FAILURES: dict[str, list[float]] = {}
 STATUSES = {"draft", "submitted", "in_review", "accepted", "returned"}
-ROUTES = {"compost", "recycling", "disposal"}
+UNITS = {"kg": "кг", "l": "л"}
+DEMO_DAYS = 91  # 2026-08-01 … 2026-10-30: үш ай
+
+# Ұйымдар мен қалдық түрлері — «АТУ университет кешеніндегі тамақ қалдықтарын есепке алу кестесі» үлгілері бойынша (ТЗ, 3-бөлім).
+ORGANIZATIONS = [
+    ("1, 2-корпус асхана кешені (ЖК «Искандер»)", "Асхана", "Асхана"),
+    ("ATU INN оқу-қонақүй кешені", "Қонақүй", "ATU INN"),
+    ("АТУ кофеханасы (ЖК «Canella»)", "Кофехана", "Кофехана"),
+    ("ТПП кафедрасы", "Кафедра", "ТПП"),
+    ("ТХиПП кафедрасы", "Кафедра", "ТХиПП"),
+]
+USERS = [
+    ("operator@atu.kz", "Демо қызметкер", "operator", 1), ("reviewer@atu.kz", "Демо тексеруші", "reviewer", None),
+    ("manager@atu.kz", "Демо басшылық", "manager", None), ("admin@atu.kz", "Жүйе әкімшісі", "admin", None),
+    ("inn@atu.kz", "ATU INN жауаптысы", "operator", 2), ("coffee@atu.kz", "Кофехана жауаптысы", "operator", 3),
+    ("tpp@atu.kz", "ТПП жауаптысы", "operator", 4), ("thipp@atu.kz", "ТХиПП жауаптысы", "operator", 5),
+]
+# атауы, өлшем бірлігі, қайта өңдеуге жарамды, әдепкі тәсіл, демо құн ₸/бірлік, демо кг CO₂e/бірлік
+WASTE_TYPES = [
+    ("Көкөніс тазалағы", "kg", 1, "compost", 150, 0.8),
+    ("Ет өнімдерінің кесінділері", "kg", 0, "tbo", 2500, 6.0),
+    ("Залдан шыққан тамақ қалдығы", "kg", 0, "tbo", 1800, 2.5),
+    ("Сатылмаған өнім қалдығы", "kg", 0, "tbo", 1800, 2.5),
+    ("Пайдаланылған май", "l", 1, "recycling", 600, 3.0),
+    ("Картон ыдыс", "kg", 1, "recycling", 40, 0.9),
+    ("Кофе сығындысы", "kg", 1, "compost", 150, 0.4),
+    ("Тамақ қалдығы", "kg", 0, "tbo_bin", 1500, 2.5),
+    ("Қаптама қалдығы", "kg", 1, "recycling", 60, 1.5),
+    ("Ет сүйегі", "kg", 0, "tbo", 800, 2.0),
+    ("Балық сүйегі", "kg", 0, "tbo", 800, 1.5),
+    ("Жұмыртқа қабығы", "kg", 1, "compost", 50, 0.3),
+    ("Сахароза", "kg", 0, "tbo", 400, 0.6),
+    ("ПЭТ-бөтелке 1,0 л (өсімдік майы)", "kg", 1, "recycling", 60, 2.2),
+    ("Шыны бөтелке", "kg", 1, "recycling", 30, 0.9),
+    ("Нан-тоқаш өнімдері үлгілерінің қалдығы", "kg", 0, "tbo", 700, 1.1),
+    ("Кондитерлік өнімдер үлгілерінің қалдығы", "kg", 0, "tbo", 1200, 1.6),
+    ("Жеміс-көкөніс қалдығы", "kg", 1, "compost", 550, 0.8),
+    ("Алюминий банка", "kg", 1, "recycling", 80, 9.0),
+]
+_CATERING = ["Көкөніс тазалағы", "Ет өнімдерінің кесінділері", "Залдан шыққан тамақ қалдығы", "Сатылмаған өнім қалдығы", "Пайдаланылған май", "Картон ыдыс"]
+ORG_WASTE = {
+    1: _CATERING, 2: _CATERING,
+    3: ["Кофе сығындысы", "Картон ыдыс", "Тамақ қалдығы"],
+    4: ["Қаптама қалдығы", "Ет сүйегі", "Балық сүйегі"],
+    5: ["Жұмыртқа қабығы", "Сахароза", "ПЭТ-бөтелке 1,0 л (өсімдік майы)", "Шыны бөтелке", "Нан-тоқаш өнімдері үлгілерінің қалдығы", "Кондитерлік өнімдер үлгілерінің қалдығы", "Жеміс-көкөніс қалдығы", "Алюминий банка"],
+}
 SESSION_TTL = 8 * 3600
 
 
@@ -79,50 +124,59 @@ def initialize(db_path):
         migrate(db)
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
             return
-        for name, kind in [("1-корпус асханасы", "Асхана"), ("2С корпус асханасы", "Асхана"), ("ATU INN", "Қонақүй"), ("Campus Coffee", "Кофехана"), ("Тағам технологиясы кафедрасы", "Кафедра")]:
-            db.execute("INSERT INTO organizations(name,kind) VALUES (?,?)", (name, kind))
-        for email, name, role, org in [("operator@atu.kz", "Демо қызметкер", "operator", 1), ("reviewer@atu.kz", "Демо тексеруші", "reviewer", None), ("manager@atu.kz", "Демо басшылық", "manager", None), ("admin@atu.kz", "Жүйе әкімшісі", "admin", None)]:
+        for name, kind, short in ORGANIZATIONS:
+            db.execute("INSERT INTO organizations(name,kind,short) VALUES (?,?,?)", (name, kind, short))
+        for email, name, role, org in USERS:
             salt = secrets.token_hex(16)
             db.execute("INSERT INTO users(email,name,role,org_id,salt,password_hash) VALUES (?,?,?,?,?,?)", (email, name, role, org, salt, password_hash(PASSWORD, salt)))
-        for name, cost, co2 in [("Дайын тағам", 1800, 2.5), ("Көкөніс пен жеміс", 550, 0.8), ("Нан және қамыр өнімдері", 700, 1.1), ("Ет және балық", 3200, 6.0), ("Сүт өнімдері", 1200, 2.2), ("Кофе қалдығы", 150, 0.4)]:
-            db.execute("INSERT INTO categories(name,cost,co2) VALUES (?,?,?)", (name, cost, co2))
-        db.execute("INSERT INTO settings VALUES ('factors_note',?)", ("Демо коэффициенттер. CO₂ және құн мәндері тек сценарийді көрсетуге арналған. Пилотта сатып алу бағаларымен және шекарасы анықталған, дереккөзі көрсетілген эмиссия коэффициенттерімен ауыстырылады.",))
+        for name, unit, recyclable, route, cost, co2 in WASTE_TYPES:
+            db.execute("INSERT INTO categories(name,unit,recyclable,default_route,cost,co2) VALUES (?,?,?,?,?,?)", (name, unit, recyclable, route, cost, co2))
+        cats = {r["name"]: dict(r) for r in db.execute("SELECT * FROM categories")}
+        for org, names in ORG_WASTE.items():
+            for name in names:
+                db.execute("INSERT INTO org_categories(org_id,category_id) VALUES (?,?)", (org, cats[name]["id"]))
+        db.execute("INSERT INTO settings VALUES ('factors_note',?)", ("Демо коэффициенттер — команданың жорамалы, дереккөзбен расталмаған. CO₂ және құн мәндері тек есептеу әдісін көрсетуге арналған. Пилотта сатып алу бағаларымен және шекарасы анықталған, дереккөзі көрсетілген эмиссия коэффициенттерімен ауыстырылады.",))
         import random
         rng = random.Random(42)
-        cats = [dict(r) for r in db.execute("SELECT * FROM categories")]
-        for offset in range(61):
+        authors = {u[3]: i for i, u in enumerate(USERS, 1) if u[2] == "operator"}
+        scale = {1: 1.5, 2: 1.0, 3: 0.5, 4: 0.4, 5: 0.3}
+        lab_days = {4: (1, 3), 5: (0, 2)}  # кафедралар: зертханалық сабақ күндері
+        for offset in range(DEMO_DAYS):
             day = DEMO_DAY - timedelta(days=offset)
             if day.weekday() == 6:
                 continue
-            for org in range(1, 5):
+            for org in range(1, 6):
+                if org in lab_days and day.weekday() not in lab_days[org]:
+                    continue
                 stamp = f"{day.isoformat()}T09:00:00+00:00"
                 status = "accepted"
                 if offset == 0:
-                    status = {1: "draft", 2: "submitted", 3: "in_review", 4: "returned"}[org]
-                elif offset == 1 and org == 1:
-                    status = "submitted"
-                report_id = db.execute("INSERT INTO reports(org_id,author_id,report_date,status,note,created_at,updated_at) VALUES (?,1,?,?,?,?,?)", (org, day.isoformat(), status, "Демонстрациялық есеп", stamp, stamp)).lastrowid
-                selected = cats[:3] if org != 4 else [cats[2], cats[5]]
+                    status = {1: "draft", 2: "submitted", 3: "in_review"}.get(org, "accepted")
+                elif offset == 1 and org in (1, 3):
+                    status = "submitted" if org == 1 else "returned"
+                author = authors[org]
+                report_id = db.execute("INSERT INTO reports(org_id,author_id,report_date,status,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?)", (org, author, day.isoformat(), status, "Демонстрациялық есеп", stamp, stamp)).lastrowid
+                names = ORG_WASTE[org]
+                selected = [cats[n] for n in rng.sample(names, min(len(names), rng.randint(3, 4)))]
+                unusual = next(c for c in selected if c["unit"] == "kg") if offset == 3 and org == 2 else None
                 for cat in selected:
-                    kg = round(rng.uniform(1.3, 9.0) * (1.5 if org == 2 else 0.65 if org == 4 else 1), 1)
-                    if offset == 3 and org == 2 and cat["id"] == 1:
+                    kg = round(rng.uniform(1.0, 8.0) * scale[org], 1)
+                    if cat is unusual:
                         kg = 38.5
-                    route = "compost" if cat["id"] in (2, 6) else rng.choice(["disposal", "disposal", "recycling"])
-                    db.execute("INSERT INTO items(report_id,category_id,kg,route,cost,co2) VALUES (?,?,?,?,?,?)", (report_id, cat["id"], kg, route, cat["cost"], cat["co2"]))
+                    db.execute("INSERT INTO items(report_id,category_id,kg,route,cost,co2) VALUES (?,?,?,?,?,?)", (report_id, cat["id"], kg, cat["default_route"], cat["cost"], cat["co2"]))
                 if org in (1, 2) and offset in (7, 14, 21):
                     served = {7:170, 14:180, 21:160}[offset]
                     db.execute('UPDATE reports SET portions=? WHERE id=?', (served, report_id))
                     dish_kg = round(db.execute('SELECT SUM(kg) FROM items WHERE report_id=?', (report_id,)).fetchone()[0] * .4, 2)
                     db.execute('INSERT INTO dishes(report_id,name,prepared,served,leftover,leftover_kg) VALUES (?,?,?,?,?,?)', (report_id, 'Палау', 200, served, 200-served, dish_kg))
-                db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,1,'created','Демо дерек',?)", (report_id, stamp))
+                db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,?,'created','Демо дерек',?)", (report_id, author, stamp))
                 if status != "draft":
-                    db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,1,'submitted','',?)", (report_id, stamp))
+                    db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,?,'submitted','',?)", (report_id, author, stamp))
                 if status in ("accepted", "returned", "in_review"):
                     db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,2,'in_review','',?)", (report_id, stamp))
                 if status in ("accepted", "returned"):
                     comment = "Өлшем нәтижесімен салыстырып, массаны нақтылаңыз." if status == "returned" else ""
                     db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,2,?,?,?)", (report_id, status, comment, stamp))
-
 
 class APIError(Exception):
     def __init__(self, message, status=400):
@@ -259,7 +313,17 @@ class Handler(SimpleHTTPRequestHandler):
             SESSIONS.pop(token, None)
             return self.respond({"ok": True}, headers={"Set-Cookie": "qaldyq_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
         if path == "/api/bootstrap" and method == "GET":
-            return self.respond({"user": user, "csrf": session["csrf"], "organizations": [dict(r) for r in db.execute("SELECT * FROM organizations ORDER BY id")], "categories": [dict(r) for r in db.execute("SELECT * FROM categories")], "factors_note": db.execute("SELECT value FROM settings WHERE key='factors_note'").fetchone()[0], "demo_date": DEMO_DAY.isoformat(), "today": local_day().isoformat()})
+            return self.respond({"user": user, "csrf": session["csrf"], "organizations": [dict(r) for r in db.execute("SELECT * FROM organizations ORDER BY id")], "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY id")], "org_categories": self.org_categories(db), "routes": [dict(r) for r in db.execute("SELECT code,name,diverted FROM routes ORDER BY position,code")], "factors_note": db.execute("SELECT value FROM settings WHERE key='factors_note'").fetchone()[0], "demo_date": DEMO_DAY.isoformat(), "today": local_day().isoformat()})
+        if path == "/api/totals" and method == "GET":
+            org = user["org_id"] if user["role"] == "operator" else int(query.get("org", [0])[0])
+            day = date.fromisoformat(query.get("date", [local_day().isoformat()])[0]).isoformat()
+            exclude = int(query.get("exclude", [0])[0])
+            rows = db.execute("""SELECT c.id AS category_id,c.name,c.unit,
+                ROUND(SUM(CASE WHEN r.report_date=? THEN i.kg ELSE 0 END),2) AS day,ROUND(SUM(i.kg),2) AS month
+                FROM items i JOIN reports r ON r.id=i.report_id JOIN categories c ON c.id=i.category_id
+                WHERE r.org_id=? AND substr(r.report_date,1,7)=? AND r.id!=? GROUP BY c.id ORDER BY c.id""", (day, org, day[:7], exclude)).fetchall()
+            same_day = db.execute("SELECT COUNT(*) FROM reports WHERE org_id=? AND report_date=? AND id!=?", (org, day, exclude)).fetchone()[0]
+            return self.respond({"date": day, "totals": [dict(r) for r in rows], "same_day_reports": same_day})
         if path == "/api/food-insights" and method == "GET":
             target = date.fromisoformat(query.get('target', [(local_day()+timedelta(days=1)).isoformat()])[0])
             if not date(2020,1,1) <= target <= date(2100,12,31):
@@ -285,7 +349,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path in ("/api/reports", "/api/export") and method == "GET":
             reports = self.list_reports(db, user, query)
             if path == "/api/export":
-                return self.export(reports, query.get("format", ["csv"])[0])
+                return self.export(db, [r for r in reports if r["status"] == "accepted"], query.get("format", ["csv"])[0])
             return self.respond({"reports": reports})
         if path == "/api/reports" and method == "POST":
             if user["role"] not in ("operator", "admin"):
@@ -316,7 +380,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise APIError("Бұл ұйымның есебіне рұқсат жоқ.", 403)
             if method == "GET" and not match[2]:
                 detail = dict(report)
-                detail["items"] = [dict(r) for r in db.execute("SELECT i.*, c.name FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id=?", (report_id,))]
+                detail["items"] = [dict(r) for r in db.execute("SELECT i.*, c.name, c.unit, c.recyclable FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id=?", (report_id,))]
                 detail["history"] = [dict(r) for r in db.execute("SELECT h.*,u.name FROM history h JOIN users u ON u.id=h.user_id WHERE report_id=? ORDER BY h.id", (report_id,))]
                 detail['dishes'] = [dict(r) for r in db.execute('SELECT * FROM dishes WHERE report_id=? ORDER BY id', (report_id,))]
                 return self.respond(detail)
@@ -360,19 +424,49 @@ class Handler(SimpleHTTPRequestHandler):
                 self.history(db, report_id, user, target, comment)
                 generate_reminders(db)
                 return self.respond({"ok": True})
-        if path in ("/api/organizations", "/api/categories") and method == "POST":
+        if path == "/api/organizations" and method == "POST":
             if user["role"] != "admin":
                 raise APIError("Әкімші құқығы қажет.", 403)
             data = self.body()
             name = str(data.get("name", "")).strip()
             if len(name) < 2 or len(name) > 120:
                 raise APIError("Атау 2–120 таңба болсын.")
-            if path.endswith("organizations"):
-                kind = str(data.get("kind", "Бөлімше")).strip()[:80] or "Бөлімше"
-                db.execute("INSERT INTO organizations(name,kind) VALUES (?,?)", (name, kind))
+            kind = str(data.get("kind", "Бөлімше")).strip()[:80] or "Бөлімше"
+            short = str(data.get("short", "")).strip()[:12] or name[:12]
+            org_id = db.execute("INSERT INTO organizations(name,kind,short) VALUES (?,?,?)", (name, kind, short)).lastrowid
+            # Жаңа ұйым сол типтегі ұйымның қалдық тізімінен бастайды; тізім формада толықтырылады.
+            db.execute("INSERT OR IGNORE INTO org_categories SELECT ?,category_id FROM org_categories WHERE org_id=(SELECT id FROM organizations WHERE kind=? AND id!=? ORDER BY id LIMIT 1)", (org_id, kind, org_id))
+            return self.respond({"ok": True, "id": org_id}, 201)
+        if path == "/api/categories" and method == "POST":
+            if user["role"] not in ("operator", "reviewer", "admin"):
+                raise APIError("Қалдық түрін жауапты қызметкер, тексеруші немесе әкімші қосады.", 403)
+            data = self.body()
+            name = " ".join(str(data.get("name", "")).split())
+            if len(name) < 2 or len(name) > 120:
+                raise APIError("Атау 2–120 таңба болсын.")
+            org_id = user["org_id"] if user["role"] == "operator" else int(data.get("org_id") or 0)
+            if org_id and not db.execute("SELECT 1 FROM organizations WHERE id=?", (org_id,)).fetchone():
+                raise APIError("Ұйымды таңдаңыз.")
+            existing = next((r for r in db.execute("SELECT id,name FROM categories") if r["name"].casefold() == name.casefold()), None)
+            if existing:
+                if not org_id or db.execute("SELECT 1 FROM org_categories WHERE org_id=? AND category_id=?", (org_id, existing["id"])).fetchone():
+                    raise APIError("Бұл қалдық түрі тізімде бар.", 409)
+                category_id = existing["id"]
             else:
-                db.execute("INSERT INTO categories(name,cost,co2) VALUES (?,?,?)", (name, number(data.get("cost"), "Құн"), number(data.get("co2"), "CO₂", maximum=1000)))
-            return self.respond({"ok": True}, 201)
+                unit = data.get("unit", "kg")
+                route = data.get("default_route", "tbo")
+                if unit not in UNITS or not isinstance(route, str) or not db.execute("SELECT 1 FROM routes WHERE code=?", (route,)).fetchone():
+                    raise APIError("Өлшем бірлігі мен кәдеге жарату тәсілін таңдаңыз.")
+                # Коэффициенттерді тек әкімші мен тексеруші береді; қызметкер қосқан түрдің бағасы кейін толтырылады.
+                priced = user["role"] != "operator"
+                cost = number(data.get("cost") or 0, "Құн") if priced else 0
+                co2 = number(data.get("co2") or 0, "CO₂", maximum=1000) if priced else 0
+                category_id = db.execute("INSERT INTO categories(name,unit,recyclable,default_route,cost,co2) VALUES (?,?,?,?,?,?)", (name, unit, 1 if data.get("recyclable") in (True, 1, "1") else 0, route, cost, co2)).lastrowid
+            if org_id:
+                db.execute("INSERT OR IGNORE INTO org_categories(org_id,category_id) VALUES (?,?)", (org_id, category_id))
+            else:
+                db.execute("INSERT OR IGNORE INTO org_categories SELECT id,? FROM organizations", (category_id,))
+            return self.respond({"ok": True, "id": category_id}, 201)
         raise APIError("Мұндай әрекет табылмады.", 404)
 
     def check_version(self, data, report):
@@ -436,12 +530,13 @@ class Handler(SimpleHTTPRequestHandler):
         if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 30:
             raise APIError("Кемінде бір қалдық жолы қажет, ең көбі — 30.")
         items = []
+        routes = {r["code"] for r in db.execute("SELECT code FROM routes")}
         for raw in raw_items:
             if not isinstance(raw, dict):
                 raise APIError("Қалдық жолы дұрыс емес.")
-            cat = db.execute("SELECT * FROM categories WHERE id=?", (int(raw.get("category_id", 0)),)).fetchone()
-            if not cat or raw.get("route") not in ROUTES:
-                raise APIError("Қалдық түрі мен бағытын таңдаңыз.")
+            cat = db.execute("SELECT c.* FROM categories c JOIN org_categories oc ON oc.category_id=c.id WHERE c.id=? AND oc.org_id=?", (int(raw.get("category_id", 0)), org_id)).fetchone()
+            if not cat or raw.get("route") not in routes:
+                raise APIError("Қалдық түрі мен кәдеге жарату тәсілін ұйым тізімінен таңдаңыз.")
             items.append((cat["id"], number(raw.get("kg"), "Масса", 0.01, 10000), raw["route"], cat["cost"], cat["co2"]))
         portions = data.get('portions')
         if portions not in (None, ''):
@@ -476,6 +571,12 @@ class Handler(SimpleHTTPRequestHandler):
     def history(self, db, report_id, user, action, comment):
         db.execute("INSERT INTO history(report_id,user_id,action,comment,created_at) VALUES (?,?,?,?,?)", (report_id, user["id"], action, comment, now()))
 
+    def org_categories(self, db):
+        result = {}
+        for row in db.execute("SELECT org_id,category_id FROM org_categories ORDER BY org_id,category_id"):
+            result.setdefault(str(row["org_id"]), []).append(row["category_id"])
+        return result
+
     def list_reports(self, db, user, query):
         clauses, args = ["1=1"], []
         for key, op in (("start", ">="), ("end", "<=")):
@@ -487,12 +588,20 @@ class Handler(SimpleHTTPRequestHandler):
         if org:
             clauses.append("r.org_id=?")
             args.append(org)
+        # Қалдық түрі сүзгісі: есептің тек сол түрдегі жолдары мен жиынтығы қайтарылады.
+        category = int(query.get("category", [0])[0])
+        if category:
+            clauses.append("i.category_id=?")
+            args.append(category)
         rows = db.execute(f"""SELECT r.id,r.org_id,r.author_id,r.report_date,r.status,r.note,r.created_at,r.updated_at,r.portions,
-            o.name AS org_name,u.name AS author,ROUND(SUM(i.kg),2) AS kg,
+            o.name AS org_name,u.name AS author,
+            ROUND(SUM(CASE WHEN c.unit='l' THEN 0 ELSE i.kg END),2) AS kg,
+            ROUND(SUM(CASE WHEN c.unit='l' THEN i.kg ELSE 0 END),2) AS liters,
             ROUND(SUM(i.kg*i.cost),2) AS cost,ROUND(SUM(i.kg*i.co2),2) AS co2,
-            ROUND(SUM(CASE WHEN i.route!='disposal' THEN i.kg ELSE 0 END),2) AS diverted_kg
+            ROUND(SUM(CASE WHEN c.unit!='l' AND i.route IN (SELECT code FROM routes WHERE diverted=1) THEN i.kg ELSE 0 END),2) AS diverted_kg,
+            ROUND(SUM(CASE WHEN c.unit!='l' AND c.recyclable=1 THEN i.kg ELSE 0 END),2) AS recyclable_kg
             FROM reports r JOIN organizations o ON o.id=r.org_id JOIN users u ON u.id=r.author_id
-            JOIN items i ON i.report_id=r.id WHERE {' AND '.join(clauses)}
+            JOIN items i ON i.report_id=r.id JOIN categories c ON c.id=i.category_id WHERE {' AND '.join(clauses)}
             GROUP BY r.id ORDER BY r.report_date DESC,r.id DESC""", args).fetchall()
         reports = [dict(r) for r in rows]
         by_id = {r["id"]: r for r in reports}
@@ -502,29 +611,44 @@ class Handler(SimpleHTTPRequestHandler):
         if reports:
             ids = list(by_id)
             placeholders = ",".join("?" for _ in ids)
-            for item in db.execute(f"SELECT i.*, c.name FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id IN ({placeholders})", ids):
+            only = " AND i.category_id=?" if category else ""
+            for item in db.execute(f"SELECT i.*, c.name, c.unit, c.recyclable FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id IN ({placeholders}){only} ORDER BY i.id", ids + ([category] if category else [])):
                 by_id[item["report_id"]]["items"].append(dict(item))
             for dish in db.execute(f'SELECT * FROM dishes WHERE report_id IN ({placeholders})', ids):
                 by_id[dish['report_id']]['dishes'].append(dict(dish))
         return reports
 
-    def export(self, reports, fmt):
-        headers = ["ID", "Күні", "Ұйым", "Мәртебе", "Қалдық түрі", "Масса, кг", "Бағыт", "Құн бағасы, ₸", "CO2 бағасы, кг", "Ескерту"]
-        rows = [[r["id"], r["report_date"], r["org_name"], r["status"], i["name"], i["kg"], i["route"], round(i["kg"]*i["cost"],2), round(i["kg"]*i["co2"],2), r["note"]] for r in reports for i in r["items"]]
+    def export(self, db, reports, fmt):
+        """Тек қабылданған жазбалар: тізілім (қолданыстағы кесте бағандары) және ұйым × қалдық түрі жиынтығы."""
+        route_names = {r["code"]: r["name"] for r in db.execute("SELECT code,name FROM routes")}
+        headers = ["ID", "Күні", "Ұйым", "Қалдық түрі", "Саны", "Өлшем бірлігі", "Кәдеге жарату тәсілі", "Жауапты тұлға", "Құн бағасы, ₸", "CO2 бағасы, кг", "Ескерту"]
+        rows = [[r["id"], r["report_date"], r["org_name"], i["name"], i["kg"], UNITS.get(i["unit"], i["unit"]), route_names.get(i["route"], i["route"]), r["author"], round(i["kg"]*i["cost"],2), round(i["kg"]*i["co2"],2), r["note"]] for r in reports for i in r["items"]]
+        summary = {}
+        for r in reports:
+            for i in r["items"]:
+                key = (r["org_name"], i["name"], UNITS.get(i["unit"], i["unit"]))
+                entry = summary.setdefault(key, [0, 0])
+                entry[0] += i["kg"]
+                entry[1] += 1
+        summary_headers = ["Ұйым", "Қалдық түрі", "Өлшем бірлігі", "Саны", "Жазба саны"]
+        summary_rows = [[org, name, unit, round(total, 2), count] for (org, name, unit), (total, count) in sorted(summary.items())]
         def safe(value):
             text = str(value)
             return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
         if fmt == "xls":
-            cells = []
-            for row in [headers] + rows:
-                cells.append("<Row>" + "".join(f'<Cell><Data ss:Type="{"Number" if isinstance(v,(int,float)) else "String"}">{escape(str(v) if isinstance(v,(int,float)) else safe(v))}</Data></Cell>' for v in row) + "</Row>")
-            body = ('<?xml version="1.0" encoding="UTF-8"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Qaldyq"><Table>' + "".join(cells) + "</Table></Worksheet></Workbook>").encode()
+            def sheet(title, table):
+                cells = []
+                for row in table:
+                    cells.append("<Row>" + "".join(f'<Cell><Data ss:Type="{"Number" if isinstance(v,(int,float)) else "String"}">{escape(str(v) if isinstance(v,(int,float)) else safe(v))}</Data></Cell>' for v in row) + "</Row>")
+                return f'<Worksheet ss:Name="{title}"><Table>' + "".join(cells) + "</Table></Worksheet>"
+            body = ('<?xml version="1.0" encoding="UTF-8"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' + sheet("Жиынтық", [summary_headers] + summary_rows) + sheet("Тізілім", [headers] + rows) + "</Workbook>").encode()
             mime, extension = "application/vnd.ms-excel", "xls"
-        elif fmt == "csv":
+        elif fmt in ("csv", "summary"):
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow(headers)
-            writer.writerows([[safe(v) for v in row] for row in rows])
+            table = [summary_headers] + summary_rows if fmt == "summary" else [headers] + rows
+            writer.writerow(table[0])
+            writer.writerows([[safe(v) for v in row] for row in table[1:]])
             body = ("\ufeff" + output.getvalue()).encode()
             mime, extension = "text/csv; charset=utf-8", "csv"
         else:
@@ -581,7 +705,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     server = create_server(args.host, args.port, args.db)
     print(f"Qaldyq: http://{args.host}:{server.server_port}", flush=True)
-    print("Demo accounts: operator@atu.kz / reviewer@atu.kz / manager@atu.kz / admin@atu.kz", flush=True)
+    print("Demo accounts: operator@atu.kz / reviewer@atu.kz / manager@atu.kz / admin@atu.kz (+ inn@, coffee@, tpp@, thipp@)", flush=True)
     print(f"Demo password: {PASSWORD}. Synthetic data only. Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()

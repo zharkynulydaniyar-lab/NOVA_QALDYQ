@@ -80,3 +80,71 @@ flowchart LR
 | POST /api/reminder-settings | Әкімші; deadline_day 1–28 |
 
 Есеп өрістері: portions (міндетті емес), dishes (0–30 тағам). POST-та submit=true атомдық жіберуді орындайды. POST/PUT request_id кілті бір пайдаланушының бір сұрауын қайталап сақтамайды. Толық архитектура мен шектеулер [FEATURES.md](FEATURES.md) ішінде.
+
+
+## v5.4 · Деректер моделі (ER)
+
+```mermaid
+erDiagram
+    organizations ||--o{ users : "жауапты тұлғалар"
+    organizations ||--o{ reports : "есептер"
+    organizations ||--o{ org_categories : "өз тізімі"
+    categories ||--o{ org_categories : ""
+    users ||--o{ reports : "автор"
+    reports ||--|{ items : "жазбалар"
+    reports ||--o{ history : "мәртебе тарихы"
+    reports ||--o{ dishes : "тағамдар"
+    categories ||--o{ items : "қалдық түрі"
+    routes ||--o{ items : "кәдеге жарату тәсілі"
+    users ||--o{ history : "орындаушы"
+    users ||--o{ notifications : "ескертулер"
+
+    organizations { int id PK
+        text name
+        text kind
+        text short }
+    users { int id PK
+        text email
+        text name
+        text role
+        int org_id FK }
+    categories { int id PK
+        text name
+        text unit "kg | l"
+        int recyclable
+        text default_route FK
+        real cost
+        real co2 }
+    routes { text code PK
+        text name
+        int diverted }
+    reports { int id PK
+        int org_id FK
+        int author_id FK
+        text report_date
+        text status
+        int portions
+        text photo }
+    items { int id PK
+        int report_id FK
+        int category_id FK
+        real kg "саны: кг немесе л"
+        text route FK
+        real cost
+        real co2 }
+    history { int id PK
+        int report_id FK
+        int user_id FK
+        text action
+        text comment
+        text created_at }
+```
+
+Күндік және айлық жиынтықтар сақталмайды, жазбалардан есептеледі. Бірыңғай тізілім — «қабылданды» мәртебесіндегі есептердің жазбалары. Қалдық түрін өшіру API-і жоқ.
+
+| Әдіс және жол | Қолжетімділік |
+| --- | --- |
+| GET /api/reports?…&category=ID | Қалдық түрі бойынша сүзгі: тек сол түрдің жолдары мен жиынтығы |
+| GET /api/totals?org=…&date=…&exclude=… | Ұйымның әр қалдық түрі бойынша күндік және айлық жиынтығы; оператор өз ұйымымен шектеледі |
+| POST /api/categories | Қызметкер (тек өз ұйымының тізіміне, коэффициентсіз), тексеруші, әкімші |
+| GET /api/export?format=csv, xls немесе summary | Тек қабылданған жазбалар; xls ішінде «Жиынтық» және «Тізілім» парақтары |
