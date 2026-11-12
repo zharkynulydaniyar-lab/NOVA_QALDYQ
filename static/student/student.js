@@ -47,9 +47,12 @@ const tenge = tiyn => (tiyn / 100).toLocaleString('ru-RU', { maximumFractionDigi
 const icons = { home: 'M3 11 12 3l9 8M5 10v10h14V10', menu: 'M4 6h16M4 12h16M4 18h10', favorites: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z', orders: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6', profile: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0' };
 const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+const telegramApp = window.Telegram?.WebApp;
+const telegramInitData = telegramApp?.initData || '';
+
 async function api(path, options = {}) {
   let response;
-  try { response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', ...options, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf, ...options.headers }, body: options.body ? JSON.stringify(options.body) : undefined }); }
+  try { response = await fetch(path, { credentials: telegramInitData ? 'omit' : 'same-origin', cache: 'no-store', ...options, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf, ...(telegramInitData ? {Authorization:'tma '+telegramInitData} : {}), ...options.headers }, body: options.body ? JSON.stringify(telegramInitData&&path==='/api/student/orders'&&options.method==='POST'?{...options.body,source:'miniapp'}:options.body) : undefined }); }
   catch { setOnline(false); throw Object.assign(new Error(t('net_error')), { network: true }); }
   setOnline(true);
   const data = await response.json().catch(() => ({}));
@@ -65,6 +68,7 @@ function closeSheet() { $('#sheet').hidden = true; $('#sheet-body').innerHTML = 
 async function loadSession() {
   try {
     const me = await api('/api/me'); state.user = me.user; state.csrf = me.csrf;
+    if(telegramInitData&&me.preferences){state.lang=me.preferences.language;state.org=me.preferences.org_id||state.org;}
     if (state.user.role === 'student' || state.user) { const fav = await api('/api/student/favorites'); state.favorites = new Set(fav.dishes.map(d => d.id)); }
   } catch (error) { if (!error.network) { state.user = null; state.csrf = ''; state.favorites = new Set(); } }
 }
@@ -228,6 +232,7 @@ function bind() {
   };
 }
 async function start() {
+  telegramApp?.ready(); telegramApp?.expand();
   state.date = isoDay(new Date());
   const tab = location.hash.slice(1); if (icons[tab]) state.tab = tab;
   $$('[data-lang]').forEach(b => b.onclick = () => { state.lang = b.dataset.lang; store.set('qaldyq-language', state.lang); render(); });

@@ -1,4 +1,5 @@
 # The web server needs only the Python standard library (3.12+).
-# This file lists the optional dependency for training the demand forecast (python train_forecast.py).
-# Without it the site still runs and uses the statistical forecasting rule.
+# Optional components: forecast training (train_forecast.py) and the Telegram worker.
+# Without scikit-learn the site still runs and uses the statistical forecasting rule.
 scikit-learn==1.9.1
+aiogram>=3.31.0,<4.0

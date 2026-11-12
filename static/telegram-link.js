@@ -1,0 +1,8 @@
+'use strict';
+const code=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+let csrf='';const $=s=>document.querySelector(s);
+async function api(path,body){const response=await fetch(path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json();if(!response.ok){const error=new Error(data.error);error.status=response.status;throw error;}return data;}
+async function preview(){try{if(!code)throw new Error('Откройте новую ссылку из команды /link в боте.');const session=await api('/api/me');csrf=session.csrf;const data=await api('/api/telegram/link/preview',{code});$('#identity').textContent=`Аккаунт: ${data.account} · Роль: ${data.role} · Telegram ID: ${data.telegram_id}. Подтверждайте только свой Telegram.`;$('#login').hidden=true;$('#confirmation').hidden=false;$('#message').textContent='';}catch(e){$('#message').textContent=e.message;if(e.status===401)$('#login').hidden=false;}}
+$('#login').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{email:$('#email').value,password:$('#password').value});$('#password').value='';await preview();}catch(error){$('#message').textContent=error.message;}};
+$('#confirm').onclick=async()=>{$('#confirm').disabled=true;try{await api('/api/telegram/link/confirm',{code});$('#confirmation').hidden=true;$('#message').textContent='Telegram привязан. Вернитесь в бот: /employee или /student. Подписки включаются отдельно: /subscriptions.';}catch(error){$('#message').textContent=error.message;$('#confirm').disabled=false;}};
+preview();

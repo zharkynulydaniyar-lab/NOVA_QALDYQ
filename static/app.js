@@ -106,6 +106,10 @@ async function boot() {
     state.view = location.hash === '#new-report' ? 'reports' : location.hash==='#notifications'?'notifications':'dashboard';
     renderShell(); await loadData();
     await featuresBoot();
+    if(location.hash==='#report'){
+      const reportId=Number(new URLSearchParams(location.search).get('report'));
+      if(Number.isSafeInteger(reportId)&&reportId>0)await openReport(reportId);
+    }
     if (location.hash === '#new-report' && canCreate()) {
       const org=Number(new URLSearchParams(location.search).get('org'));
       if(org&&state.boot.user.role==='operator'&&org!==state.boot.user.org_id)toast('Бұл QR басқа ұйымға арналған. Өз асханаңыздың QR-кодын қолданыңыз.',true);

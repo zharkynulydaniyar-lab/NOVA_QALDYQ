@@ -85,7 +85,7 @@ def process(db, channel, send, limit=50, clock=None):
 
 def create_link_code(db, user_id, channel="telegram", minutes=10):
     """One-time code the user types to the bot. Only its hash is stored."""
-    code = secrets.token_hex(4).upper()
+    code = secrets.token_hex(16).upper()
     expires = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
     db.execute("DELETE FROM link_codes WHERE user_id=? AND channel=? AND used_at IS NULL", (user_id, channel))
     db.execute("INSERT INTO link_codes(code_hash,user_id,channel,expires_at) VALUES (?,?,?,?)", (hashlib.sha256(code.encode()).hexdigest(), user_id, channel, expires))

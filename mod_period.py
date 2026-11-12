@@ -175,6 +175,10 @@ def transition(db, user, period, target, comment=""):
         cascade(db, period, user["id"], ("submitted", "in_review"), target, comment)
         db.execute("UPDATE period_reports SET status=?,reviewer_id=?,decided_at=?,updated_at=? WHERE id=?", (target, user["id"], stamp, stamp, period["id"]))
     log(db, period["id"], user["id"], source, target, target, comment)
+    if target == 'returned':
+        from telegram_service import report_returned
+        event_id = db.execute('SELECT MAX(id) FROM period_history WHERE period_id=?',(period['id'],)).fetchone()[0]
+        report_returned(db,period['org_id'],period['id'],comment,event_id,period=True)
 
 
 def overview(db, user, start, end):
