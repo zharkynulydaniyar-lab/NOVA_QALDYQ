@@ -7,6 +7,29 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$parseTokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'Launcher has PowerShell syntax errors.' }
 
+foreach ($functionName in @('Test-AppHealth','Find-AvailablePort')) {
+    $definition = $ast.Find({ param($item)
+        $item -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $functionName
+    }, $true)
+    if (!$definition) { throw "Missing function: $functionName" }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$healthy = @{ service = 'qaldyq'; telegram_ready = $true; app_url = 'https://new.trycloudflare.com' }
+if (!(Test-AppHealth $healthy 'https://new.trycloudflare.com/')) { throw 'Expected matching health.' }
+if (Test-AppHealth $healthy 'https://old.trycloudflare.com') { throw 'An older server must not pass readiness.' }
+if (Test-AppHealth $null 'https://new.trycloudflare.com') { throw 'Missing server must not pass readiness.' }
+$script:checkedPorts = @()
+function Test-LocalPortAvailable([int]$Port) {
+    $script:checkedPorts += $Port
+    return $Port -eq 8768
+}
+if ((Find-AvailablePort) -ne 8768 -or ($script:checkedPorts -join ',') -ne '8765,8766,8767,8768') { throw 'Occupied ports were not skipped.' }
+function Test-LocalPortAvailable([int]$Port) { return $false }
+$unavailableRejected = $false
+try { [void](Find-AvailablePort) } catch { $unavailableRejected = $true }
+if (!$unavailableRejected) { throw 'No available port must stop the launcher.' }
+Write-Output 'PASS: occupied ports are skipped; old server health is rejected'
+
 # Exercise the exact production native-command quoting on the current PowerShell version.
 $checkCommand = $ast.Find({ param($item)
     $item -is [System.Management.Automation.Language.CommandAst] -and $item.Extent.Text -like '*find_spec*'

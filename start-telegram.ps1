@@ -13,6 +13,29 @@ function Read-Health([string]$Address) {
     catch { return $null }
 }
 
+function Test-AppHealth([object]$Health, [string]$Address) {
+    return $Health -and $Health.service -eq 'qaldyq' -and $Health.telegram_ready -and $Health.app_url -eq $Address.TrimEnd('/')
+}
+
+function Test-LocalPortAvailable([int]$Port) {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+    try {
+        # Match server.py on Windows: LISTEN enumeration alone misses occupied sockets.
+        $listener.ExclusiveAddressUse = $true
+        $listener.Start()
+        return $true
+    } catch [System.Net.Sockets.SocketException] {
+        return $false
+    } finally { $listener.Stop() }
+}
+
+function Find-AvailablePort {
+    foreach ($candidate in 8765..8785) {
+        if (Test-LocalPortAvailable $candidate) { return $candidate }
+    }
+    throw 'No available Qaldyq port (8765-8785). Close the previous Qaldyq launch before retrying.'
+}
+
 function Test-NeedsTunnel([string]$Address) {
     if (!$Address) { return $true }
     $uri = [uri]$Address
@@ -122,7 +145,7 @@ try {
             $previousBot = Get-Process -Id $previous.bot_pid -ErrorAction SilentlyContinue
             $previousHealth = Read-Health $previous.app_url
             if ($previousBot -and $previousHealth -and $previousHealth.telegram_ready -and $previous.app_url -eq $env:QALDYQ_PUBLIC_URL -and $previous.mode -eq $Mode) {
-                Write-Host "Qaldyq Telegram is already running. App: $($previous.app_url)/student/"
+                Write-Host "Qaldyq Telegram is already running. App: $($previous.app_url)/student.html"
                 exit 0
             }
             # Restart only components whose PID AND creation time match this launcher's state.
@@ -150,7 +173,7 @@ try {
     $port = 8765
     $localHealth = Read-Health "http://127.0.0.1:$port"
     $publicHealth = if ($env:QALDYQ_PUBLIC_URL -match '^https://') { Read-Health $env:QALDYQ_PUBLIC_URL } else { $null }
-    $reuse = $localHealth -and $publicHealth -and $localHealth.service -eq 'qaldyq' -and $localHealth.telegram_ready -and $localHealth.app_url -eq $env:QALDYQ_PUBLIC_URL -and $publicHealth.app_url -eq $env:QALDYQ_PUBLIC_URL
+    $reuse = !$needsTunnel -and (Test-AppHealth $localHealth $env:QALDYQ_PUBLIC_URL) -and (Test-AppHealth $publicHealth $env:QALDYQ_PUBLIC_URL)
     if (!$reuse -and !$needsTunnel) {
         # A configured domain is owned by the deployment: never replace it with a temporary tunnel.
         $port = if ($env:QALDYQ_PORT) { [int]$env:QALDYQ_PORT } else { 8765 }
@@ -170,8 +193,7 @@ try {
         }
     }
     if (!$reuse -and $needsTunnel) {
-        $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort)
-        while ($port -in $listeners) { $port++; if ($port -gt 8785) { throw 'No free Qaldyq port (8765-8785).' } }
+        $port = Find-AvailablePort
         Write-Host "Starting HTTPS tunnel to port $port..."
         $tunnelProcess = Start-Component $cloudflaredPath @('tunnel', '--url', "http://127.0.0.1:$port") 'tunnel'
         $address = $null
@@ -192,28 +214,31 @@ try {
         $deadline = [DateTime]::UtcNow.AddSeconds(25)
         do {
             $serverProcess.Refresh()
-            if ($serverProcess.HasExited) { throw 'Web server exited. See data\telegram-runtime\server.err.log.' }
+            $serverError = Read-SharedLog (Join-Path $runtimePath 'server.err.log')
+            if ($serverError -match 'WinError 10048') { throw 'The web server port became occupied. Run the launcher again to select another port. See data\telegram-runtime\server.err.log.' }
+            if ($serverProcess.HasExited -or $serverError -match 'Traceback \(most recent call last\)') { throw 'Web server exited. See data\telegram-runtime\server.err.log.' }
             $localHealth = Read-Health "http://127.0.0.1:$port"
-            if ($localHealth -and $localHealth.telegram_ready) { break }
+            if (Test-AppHealth $localHealth $address) { break }
             Start-Sleep -Milliseconds 500
         } while ([DateTime]::UtcNow -lt $deadline)
-        if (!$localHealth -or !$localHealth.telegram_ready) { throw 'Web server is not ready for Telegram.' }
-        $deadline = [DateTime]::UtcNow.AddSeconds(25)
+        if (!(Test-AppHealth $localHealth $address)) { throw 'The new web server is not ready for Telegram. Check data\telegram-runtime\server.err.log; an older server response is not accepted.' }
+        Write-Host 'Waiting for the public HTTPS address (up to 90 seconds)...'
+        $deadline = [DateTime]::UtcNow.AddSeconds(90)
         do {
             $publicHealth = Read-Health $address
-            if ($publicHealth -and $publicHealth.app_url -eq $address) { break }
+            if (Test-AppHealth $publicHealth $address) { break }
             Start-Sleep -Milliseconds 500
         } while ([DateTime]::UtcNow -lt $deadline)
-        if (!$publicHealth -or $publicHealth.app_url -ne $address) { throw 'The public HTTPS address is not responding yet. Try the launcher again.' }
+        if (!(Test-AppHealth $publicHealth $address)) { throw 'The local server is ready, but public HTTPS is unavailable. Check data\telegram-runtime\tunnel.err.log and retry the launcher.' }
     }
-    Write-Host 'Starting Telegram $Mode and notification worker...'
+    Write-Host "Starting Telegram $Mode and notification worker..."
     $botProcess = Start-Component $pythonPath @('-u', 'telegram_bot.py', '--mode', $Mode) 'bot'
     Start-Sleep -Seconds 5
     $botProcess.Refresh()
     if ($botProcess.HasExited) { throw 'Telegram worker exited. See data\telegram-runtime\bot.err.log.' }
     Save-Status 'running' "Bot @$($identity.username); server and public HTTPS health verified." $serverProcess $tunnelProcess $botProcess
     Write-Host "Ready. Bot: https://t.me/$($identity.username)"
-    Write-Host "Mini App: $env:QALDYQ_PUBLIC_URL/student.html"
+    Write-Host "Mini App: $env:QALDYQ_PUBLIC_URL/student/"
     Write-Host 'Open the bot: /start, then /link (existing account) or /student (new student).'
     Write-Host 'Processes run in the background. Status and logs: data\telegram-runtime'
 } catch {
