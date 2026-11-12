@@ -459,7 +459,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise APIError("Бұл ұйымның есебіне рұқсат жоқ.", 403)
             if method == "GET" and not match[2]:
                 detail = dict(report)
-                detail["items"] = [dict(r) for r in db.execute("SELECT i.*, c.name, c.unit, c.recyclable FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id=?", (report_id,))]
+                detail["items"] = [dict(r) for r in db.execute("SELECT i.*, c.name, c.unit, c.recyclable, EXISTS(SELECT 1 FROM stock_moves m WHERE m.waste_item_id=i.id) AS locked FROM items i JOIN categories c ON c.id=i.category_id WHERE report_id=?", (report_id,))]
                 detail["history"] = [dict(r) for r in db.execute("SELECT h.*,u.name FROM history h JOIN users u ON u.id=h.user_id WHERE report_id=? ORDER BY h.id", (report_id,))]
                 detail['dishes'] = [dict(r) for r in db.execute('SELECT * FROM dishes WHERE report_id=? ORDER BY id', (report_id,))]
                 return self.respond(detail)
@@ -472,13 +472,17 @@ class Handler(SimpleHTTPRequestHandler):
                 if report['status'] not in ('draft','returned'):
                     raise APIError("Тек черновик пен қайтарылған есепті өңдеуге болады.", 403)
                 self.check_version(data, report)
-                values, items = self.validate_report(db, user, data)
+                # Measurements created by a stock write-off stay as they are: the stock move points at them.
+                linked = {r[0] for r in db.execute("SELECT waste_item_id FROM stock_moves WHERE waste_item_id IN (SELECT id FROM items WHERE report_id=?)", (report_id,))}
+                if linked and isinstance(data.get("items"), list):
+                    data = {**data, "items": [i for i in data["items"] if not (isinstance(i, dict) and i.get("id") in linked)]}
+                values, items = self.validate_report(db, user, data, minimum_items=0 if linked else 1)
                 if values["org_id"] != report["org_id"]:
                     raise APIError("Есептің ұйымын өзгертуге болмайды.")
                 mod_period.ensure_unlocked(db, report["org_id"], report["report_date"])
                 mod_period.ensure_unlocked(db, report["org_id"], values["report_date"])
                 db.execute("UPDATE reports SET report_date=?,note=?,photo=?,updated_at=?,portions=? WHERE id=?", (values["report_date"], values["note"], values["photo"], now(), values['portions'], report_id))
-                db.execute("DELETE FROM items WHERE report_id=?", (report_id,))
+                db.execute(f"DELETE FROM items WHERE report_id=? AND id NOT IN ({','.join('?' for _ in linked) or 'NULL'})", (report_id, *linked))
                 self.save_items(db, report_id, items)
                 db.execute('DELETE FROM dishes WHERE report_id=?', (report_id,))
                 self.save_dishes(db, report_id, values['dishes'])
@@ -586,7 +590,7 @@ class Handler(SimpleHTTPRequestHandler):
     def save_dishes(self, db, report_id, dishes):
         db.executemany('INSERT INTO dishes(report_id,name,prepared,served,leftover,leftover_kg) VALUES (?,?,?,?,?,?)', [(report_id, *d) for d in dishes])
 
-    def validate_report(self, db, user, data):
+    def validate_report(self, db, user, data, minimum_items=1):
         org_id = int(data.get("org_id", 0))
         if user["role"] == "operator" and org_id != user["org_id"]:
             raise APIError("Тек өз ұйымыңызға есеп енгізе аласыз.", 403)
@@ -618,7 +622,7 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             photo = None
         raw_items = data.get("items", [])
-        if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 30:
+        if not isinstance(raw_items, list) or not minimum_items <= len(raw_items) <= 30:
             raise APIError("Кемінде бір қалдық жолы қажет, ең көбі — 30.")
         items = []
         routes = {r["code"] for r in db.execute("SELECT code FROM routes WHERE active=1")}
