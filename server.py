@@ -678,7 +678,9 @@ class LocalServer(ThreadingHTTPServer):
 
 
 def create_server(host="127.0.0.1", port=8765, db_path=None):
-    db_path = str(db_path or ROOT / "data" / "qaldyq.sqlite3")
+    # A new file name per data model: the pre-5.4 database (other organizations and waste types)
+    # is left untouched on disk and is simply no longer opened.
+    db_path = str(db_path or ROOT / "data" / "qaldyq-v5.4.sqlite3")
     initialize(db_path)
     server = LocalServer((host, port), Handler)
     server.db_path = db_path
