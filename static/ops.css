@@ -32,3 +32,9 @@ button.top-avatar:hover,button.top-avatar:focus-visible{box-shadow:0 0 0 2px #85
 .food-kpis article p{font-size:11px;line-height:1.6}
 #k-form textarea,#k-shift textarea{width:100%}
 @media(max-width:760px){.recipe-row{grid-template-columns:1fr 1fr}.kitchen-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.kitchen-tabs button{flex:none}}
+.badge.act-proposed,.badge.tr-planned{background:#eef0ea;color:#5a6652}.badge.act-approved,.badge.tr-handed{background:#fdf1d8;color:#8a5a12}.badge.act-running{background:#e2edf3;color:#2c5a73}
+.badge.act-evaluating{background:#ece4f5;color:#5d4380}.badge.act-done,.badge.tr-confirmed{background:#e4f2d2;color:#2f6b3d}.badge.act-stopped{background:#fbe6e1;color:#b3402f}
+.plain-list{margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.9}
+.extra-stats{margin-top:16px}.extra-stats .stat-value{font-size:24px}
+#act-form textarea,#ask-form textarea,.detail-body textarea{width:100%}
+@media(max-width:760px){.workflow-strip{flex-wrap:wrap;row-gap:6px}.workflow-strip>.icon{display:none}}

@@ -24,8 +24,9 @@ import mod_period
 
 import mod_student
 import mod_kitchen
+import mod_actions
 
-MODULES = [mod_admin, mod_period, mod_student, mod_kitchen]
+MODULES = [mod_admin, mod_period, mod_student, mod_kitchen, mod_actions]
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus

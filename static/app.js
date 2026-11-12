@@ -149,7 +149,10 @@ async function loadData() {
   state.loading = true; renderMain();
   const end = new Date(state.start+'T12:00:00'); end.setDate(end.getDate()-1);
   const days = Math.round((new Date(state.end+'T12:00:00') - new Date(state.start+'T12:00:00'))/86400000)+1;
-  const start = new Date(end); start.setDate(start.getDate()-days+1);
+  let start = new Date(end); start.setDate(start.getDate()-days+1);
+  // Month, quarter and year presets compare with the same span of the previous calendar period.
+  const shift = {month:1,quarter:3,year:12}[state.period];
+  if(shift){const back=value=>{const d=new Date(value+'T12:00:00'),day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()-shift);d.setDate(Math.min(day,new Date(d.getFullYear(),d.getMonth()+1,0).getDate()));return d;};start=back(state.start);end.setTime(back(state.end).getTime());}
   const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   try {
     const [current, previous] = await Promise.all([api('/api/reports?'+query), api('/api/reports?'+new URLSearchParams({start:iso(start),end:iso(end),org:state.org}))]);
@@ -162,6 +165,7 @@ async function loadData() {
   finally { if(sequence===loadSequence && state.boot?.user.id===userId) {state.loading=false;$('#pending-count').textContent=state.reports.filter(r=>['submitted','in_review'].includes(r.status)).length;renderMain();} }
   if(state.boot?.user.id===userId&&state.view==='food')await loadFood();
   const extra=window.QaldyqViews?.[state.view];if(state.boot?.user.id===userId&&extra?.reload)await extra.load();
+  if(state.boot?.user.id===userId&&state.view==='dashboard'&&typeof loadDashboardExtras==='function')loadDashboardExtras();
 }
 
 function filters() {
@@ -201,7 +205,7 @@ function statsCards() {
   const kg=sum(rows,'kg'), prior=sum(previous,'kg');
   const change=prior?Math.round((kg-prior)/prior*100):null;
   const diverted=kg?sum(rows,'diverted_kg')/kg*100:0,recyclable=kg?sum(rows,'recyclable_kg')/kg*100:0;
-  return `<div class="stat-grid"><article class="stat-card"><div class="stat-label">Тіркелген қалдық ${icon('scale')}</div><div class="stat-value">${fmt(kg,1)} <span>кг</span></div><div class="stat-foot">${change!==null?`<span class="trend ${change<=0?'good':'bad'}">${change<=0?'↘':'↗'} ${Math.abs(change)}%</span><span>алдыңғы тең кезеңмен</span>`:'<span>Салыстыруға алдыңғы дерек жоқ</span>'}</div></article><article class="stat-card"><div class="stat-label">Қалдық құнының бағасы ${icon('coins')}</div><div class="stat-value">${fmt(sum(rows,'cost'))} <span>₸</span></div><div class="stat-foot">Масса × санаттың есептік құны</div></article><article class="stat-card"><div class="stat-label">Көміртек ізі · бағалау ${icon('leaf')}</div><div class="stat-value">${fmt(sum(rows,'co2')/1000,2)} <span>т CO₂e</span></div><div class="stat-foot">Демо коэффициенттер бойынша</div></article><article class="stat-card"><div class="stat-label">Өңдеуге бағытталған ${icon('recycle')}</div><div class="stat-value">${fmt(diverted,1)} <span>%</span></div><div class="mini-progress"><i style="width:${diverted}%"></i></div><div class="stat-foot">${fmt(sum(rows,'diverted_kg'),1)} кг · өңделгені расталмаған</div><div class="stat-foot">Түрі бойынша қайта өңдеуге жарамды: ${fmt(recyclable,1)}%</div></article></div>`;
+  return `<div class="stat-grid"><article class="stat-card"><div class="stat-label">Тіркелген қалдық ${icon('scale')}</div><div class="stat-value">${fmt(kg,1)} <span>кг</span></div><div class="stat-foot">${change!==null?`<span class="trend ${change<=0?'good':'bad'}">${change<=0?'↘':'↗'} ${Math.abs(change)}%</span><span>${{month:'алдыңғы аймен',quarter:'алдыңғы тоқсанмен',year:'алдыңғы жылмен'}[state.period]||'алдыңғы тең кезеңмен'}</span>`:'<span>Салыстыруға алдыңғы дерек жоқ</span>'}</div></article><article class="stat-card"><div class="stat-label">Қалдық құнының бағасы ${icon('coins')}</div><div class="stat-value">${fmt(sum(rows,'cost'))} <span>₸</span></div><div class="stat-foot">Масса × санаттың есептік құны</div></article><article class="stat-card"><div class="stat-label">Көміртек ізі · бағалау ${icon('leaf')}</div><div class="stat-value">${fmt(sum(rows,'co2')/1000,2)} <span>т CO₂e</span></div><div class="stat-foot">Демо коэффициенттер бойынша</div></article><article class="stat-card"><div class="stat-label">Өңдеуге бағытталған ${icon('recycle')}</div><div class="stat-value">${fmt(diverted,1)} <span>%</span></div><div class="mini-progress"><i style="width:${diverted}%"></i></div><div class="stat-foot">${fmt(sum(rows,'diverted_kg'),1)} кг · өңделгені расталмаған</div><div class="stat-foot">Түрі бойынша қайта өңдеуге жарамды: ${fmt(recyclable,1)}%</div></article></div>`;
 }
 
 function workerScene(kind){return `<div class="worker-scene" data-worker-scene="${kind}"><div class="scene-step"><span data-motion-step>Көрініс дайындалуда…</span></div></div>`;}
@@ -221,7 +225,7 @@ function dashboardView() {
   const missing=organizations.filter(o=>!submittedOrgs.has(o.id));
   return heading('Кампусқа шолу','Қалдық есебі, ресурстар және экологиялық көрсеткіштер.',createButton())+
     studioHero(rows)+
-    filters()+statsCards()+
+    filters()+statsCards()+(typeof dashboardExtras==='function'?dashboardExtras():'')+
     `<div class="chart-grid"><section class="panel chart-panel"><div class="panel-title"><div><h2>Қалдық динамикасы</h2><p>Қабылданған есептер · килограмм</p></div><span class="legend-dot">Ағымдағы кезең</span></div>${lineChart(rows)}</section><section class="panel"><div class="panel-title"><div><h2>Қалдық құрамы</h2><p>Түрлер бойынша бөлініс</p></div>${icon('leaf')}</div>${compositionChart(rows,kg)}</section></div>`+
     `<section class="panel chart-panel"><div class="panel-title"><div><h2>Ұйымдарды салыстыру</h2><p>Қабылданған есептер · килограмм</p></div>${icon('building')}</div>${orgChart(rows)}</section>`+
     `<div class="insight-row"><div class="insight"><span class="insight-icon amber">${icon('clock')}</span><div><strong>${pending} есеп тексеруді күтуде</strong><p>Қабылданған деректер ғана аналитикаға қосылады.</p></div><button class="text-link" data-action="pending">Қарау ${icon('chevron')}</button></div><div class="insight"><span class="insight-icon mint">${icon('building')}</span><div><strong>${submittedOrgs.size}/${organizations.length} ұйым есеп жіберді</strong><p>${missing.length ? esc(missing.map(o=>o.name).join(', '))+' · есеп күтілуде' : 'Таңдалған кезеңде барлық ұйым есеп жіберген.'}</p></div></div></div>`+
