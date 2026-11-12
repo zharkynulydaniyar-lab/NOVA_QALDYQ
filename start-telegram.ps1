@@ -122,7 +122,7 @@ try {
             $previousBot = Get-Process -Id $previous.bot_pid -ErrorAction SilentlyContinue
             $previousHealth = Read-Health $previous.app_url
             if ($previousBot -and $previousHealth -and $previousHealth.telegram_ready -and $previous.app_url -eq $env:QALDYQ_PUBLIC_URL -and $previous.mode -eq $Mode) {
-                Write-Host "Qaldyq Telegram is already running. App: $($previous.app_url)/student.html"
+                Write-Host "Qaldyq Telegram is already running. App: $($previous.app_url)/student/"
                 exit 0
             }
             # Restart only components whose PID AND creation time match this launcher's state.
