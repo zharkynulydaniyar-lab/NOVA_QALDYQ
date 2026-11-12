@@ -24,3 +24,11 @@ button.top-avatar:hover,button.top-avatar:focus-visible{box-shadow:0 0 0 2px #85
 .code-input{font-family:ui-monospace,Menlo,monospace;letter-spacing:2px;text-transform:uppercase}
 .badge.order-confirmed{background:#e4f2d2;color:#2f6b3d}.badge.order-issued{background:#e2edf3;color:#2c5a73}.badge.order-cancelled{background:#eee;color:#666}.badge.order-no_show{background:#fbe6e1;color:#b3402f}
 @media(max-width:760px){.portion-row{grid-template-columns:1fr 1fr}.portion-row .remove-portion{grid-column:2;justify-self:end}.menu-settings{grid-template-columns:1fr 1fr}}
+.kitchen-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}
+.kitchen-tabs button{border:1px solid #dfe7d6;background:#fff;border-radius:999px;padding:8px 14px;font:inherit;font-size:12px;cursor:pointer;color:#35503a}
+.kitchen-tabs button.selected{background:#075c46;border-color:#075c46;color:#fff}
+.recipe-row{display:grid;grid-template-columns:1.6fr .8fr .7fr 26px;gap:8px;align-items:end;margin-bottom:10px}
+.badge.cond-ok,.badge.bal-balanced{background:#e4f2d2;color:#2f6b3d}.badge.cond-soon,.badge.bal-open{background:#fdf1d8;color:#8a5a12}.badge.cond-expired,.badge.cond-unfit,.badge.bal-clarify{background:#fbe6e1;color:#b3402f}
+.food-kpis article p{font-size:11px;line-height:1.6}
+#k-form textarea,#k-shift textarea{width:100%}
+@media(max-width:760px){.recipe-row{grid-template-columns:1fr 1fr}.kitchen-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.kitchen-tabs button{flex:none}}

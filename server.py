@@ -23,8 +23,9 @@ import mod_admin
 import mod_period
 
 import mod_student
+import mod_kitchen
 
-MODULES = [mod_admin, mod_period, mod_student]
+MODULES = [mod_admin, mod_period, mod_student, mod_kitchen]
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
@@ -786,6 +787,9 @@ def create_server(host="127.0.0.1", port=8765, db_path=None):
             try:
                 with connect(db_path) as db:
                     generate_reminders(db)
+                    for module in MODULES:
+                        if hasattr(module, "tick"):
+                            module.tick(db)
             except sqlite3.Error:
                 import traceback
                 traceback.print_exc()

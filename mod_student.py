@@ -577,3 +577,12 @@ def startup(db):
             for portion in db.execute("SELECT p.id,p.dish_id,d.name FROM dish_portions p JOIN catalog_dishes d ON d.id=p.dish_id WHERE d.org_id=? AND d.active=1 AND p.active=1", (org_id,)).fetchall():
                 if (org_id, portion["name"]) in plan:
                     db.execute("INSERT INTO menu_items(menu_id,dish_id,portion_id,available) VALUES (?,?,?,?)", (menu_id, portion["dish_id"], portion["id"], max(5, plan[(org_id, portion["name"])] // 3)))
+
+
+def tick(db):
+    """Once a minute: remind about a pickup that starts within the next 30 minutes (one reminder per order)."""
+    current = common.local_now()
+    for order in db.execute("SELECT id,user_id,day,pickup_slot FROM orders WHERE status='confirmed' AND day=?", (current.date().isoformat(),)).fetchall():
+        minutes = (datetime.fromisoformat(f"{order['day']}T{order['pickup_slot']}") - current).total_seconds() / 60
+        if 0 <= minutes <= 30:
+            notify.enqueue(db, order["user_id"], "pickup_reminder", "Тапсырысты алу уақыты жақын", f"№{order['id']} · {order['pickup_slot']}", f"order:{order['id']}:reminder", {"order_id": order["id"]})
