@@ -25,8 +25,10 @@ import mod_period
 import mod_student
 import mod_kitchen
 import mod_actions
+import mod_forecast
+import mod_demo
 
-MODULES = [mod_admin, mod_period, mod_student, mod_kitchen, mod_actions]
+MODULES = [mod_admin, mod_period, mod_student, mod_kitchen, mod_actions, mod_forecast, mod_demo]
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
@@ -131,7 +133,8 @@ def initialize(db_path):
         """)
         migrate(db)
         for module in MODULES:
-            module.migrate(db)
+            if hasattr(module, "migrate"):
+                module.migrate(db)
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
             return
         for name, kind, short, name_ru, address, hours, is_public, description in ORGANIZATIONS:
@@ -360,7 +363,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/bootstrap" and method == "GET":
             return self.respond({"user": user, "csrf": session["csrf"], "organizations": mod_admin.organizations(db), "stages": list(STAGES), "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY id")], "org_categories": self.org_categories(db), "routes": [dict(r) for r in db.execute("SELECT code,name,diverted FROM routes ORDER BY position,code")], "factors_note": db.execute("SELECT value FROM settings WHERE key='factors_note'").fetchone()[0], "demo_date": DEMO_DAY.isoformat(), "today": local_day().isoformat()})
         for module in MODULES:
-            if module.handle(self, db, user, method, path, query):
+            if hasattr(module, "handle") and module.handle(self, db, user, method, path, query):
                 return
         if path == "/api/totals" and method == "GET":
             org = user["org_id"] if user["role"] == "operator" else int(query.get("org", [0])[0])
