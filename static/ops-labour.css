@@ -1,0 +1,6 @@
+/* Labour calculation block in the impact calculator. */
+.labour-results{margin:16px 0 8px;padding:16px 18px;border-radius:12px;background:#f1f6e8;border:1px solid #dfe9d0}
+.labour-results .result-pair{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.labour-results span{display:block;font-size:10px;color:#7f926f}
+.labour-results strong{font-size:20px;color:#2f5a3a}
+@media(max-width:760px){.labour-results .result-pair{grid-template-columns:1fr}}
