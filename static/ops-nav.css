@@ -1,0 +1,5 @@
+/* The menu now has many sections: give it the full sidebar height and drop the decorative card. */
+.sidebar .campus-card{display:none}
+.sidebar nav{max-height:calc(100vh - 250px);overflow-y:auto;scrollbar-width:thin}
+@media(min-width:1600px){.sidebar nav{max-height:calc(100vh - 250px)}}
+@media(max-width:700px){.sidebar nav{max-height:calc(100dvh - 230px)}}
